@@ -36,7 +36,7 @@ const CLASSES = [
 	 "passive": {"name": "Persecución", "effect": "chase", "desc": "Tras una habilidad, tu próximo básico salta al objetivo."},
 	 "s3": {"name": "Paso veloz", "type": "dash", "range": 5.0, "width": 1.8, "dmg": 22, "cd": 6.0},
 	 "ult": {"name": "Onda de fisión", "type": "line", "range": 11.0, "width": 2.6, "dmg": 95, "delay": 0.15, "buff": "lifesteal", "val": 0.4, "dur": 6.0, "cd": 32.0}},
-	{"id": "asesino", "cls": "Asesino", "style": "Sombra del templo", "color": Color("#b4a7d6"), "hp": 620, "speed": 7.4, "phys": true, "natural": "garras",
+	{"id": "asesino", "cls": "Asesino", "style": "Agente secreto", "color": Color("#b4a7d6"), "hp": 620, "speed": 7.4, "phys": true, "natural": "garras",
 	 "s1": {"name": "Zarpazo", "type": "dash", "range": 6.5, "width": 1.8, "dmg": 32, "cd": 4.0},
 	 "s2": {"name": "Bomba de humo", "type": "smoke", "radius": 4.0, "dur": 4.0, "slow": 0.4, "cd": 11.0},
 	 "passive": {"name": "Instinto", "effect": "camo", "desc": "Tras 3 s sin recibir daño te camuflás; el primer golpe aturde y pega +50%."},
