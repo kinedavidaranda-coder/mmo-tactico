@@ -13,6 +13,8 @@ const CHUNK := 64               # celdas por pedazo de malla (64 × 2 m = 128 m)
 # Rasgos del mapa (x = este, z = sur; el norte es -z)
 const CAPITAL := Vector2(0, 0)
 const CAPITAL_R := 52.0
+const SAPIENTIA := Vector2(-235, 40)      # ciudad del conocimiento, al oeste
+const SAPIENTIA_R := 46.0
 const LAKE := Vector2(300, 140)
 const LAKE_R := 85.0
 const RIVER = [Vector2(-90, -470), Vector2(-70, -330), Vector2(-20, -200), Vector2(60, -110), Vector2(110, -20), Vector2(170, 60), Vector2(240, 110), Vector2(300, 140)]
@@ -100,6 +102,11 @@ func base_height(x: float, z: float) -> float:
 	if dc < CAPITAL_R + 45.0:
 		var k: float = smoothstep(CAPITAL_R + 45.0, CAPITAL_R, dc)
 		h = lerp(h, 6.0, k)
+	# Sapientia: meseta plana al borde del cañadón
+	var ds := p.distance_to(SAPIENTIA)
+	if ds < SAPIENTIA_R + 40.0:
+		var k: float = smoothstep(SAPIENTIA_R + 40.0, SAPIENTIA_R, ds)
+		h = lerp(h, 9.0, k)
 	# bordes del mapa: suben para cerrar el mundo
 	var edge: float = max(abs(x), abs(z))
 	h += smoothstep(HALF - 60.0, HALF, edge) * 40.0
@@ -191,6 +198,9 @@ func color_at(i: int, j: int) -> Color:
 	# capital: plaza de piedra clara
 	if p.distance_to(CAPITAL) < CAPITAL_R:
 		c = c.lerp(Color("#cfc6b4").lerp(Color("#bdb39f"), v), 0.9)
+	# Sapientia: plaza de arenisca
+	if p.distance_to(SAPIENTIA) < SAPIENTIA_R:
+		c = c.lerp(Color("#d6bf95").lerp(Color("#c4a97c"), v), 0.9)
 	return c
 
 # ----------------------------------------------------------------- malla
@@ -241,7 +251,7 @@ func tree_density(x: float, z: float) -> float:
 	var h := height(x, z)
 	if h < 1.2 or h > 50.0:
 		return 0.0
-	if road_dist(p) < 8.0 or river_dist(p) < 14.0 or p.distance_to(CAPITAL) < CAPITAL_R + 25.0:
+	if road_dist(p) < 8.0 or river_dist(p) < 14.0 or p.distance_to(CAPITAL) < CAPITAL_R + 25.0 or p.distance_to(SAPIENTIA) < SAPIENTIA_R + 22.0:
 		return 0.0
 	if z > 150.0 and abs(x) < 380.0:
 		return 0.01           # campos: casi sin árboles

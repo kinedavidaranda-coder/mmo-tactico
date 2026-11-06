@@ -43,3 +43,14 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - El daño que hacés es el que reciben, así que cuanto más fuerte sos (rangos de habilidad), más fácil los volteás. Los proyectiles chocan con los troncos.
 - Al caer dejan un tocón y dan madera (chico 1, mediano 3). Vuelven a crecer: los chicos a los 2 minutos y los medianos a los 5.
 - Hay cuatro árboles antiguos gigantes como puntos de referencia del mapa.
+
+## Ciudades y zonas de monstruos
+- **Lumen** (capital): empiezan Tanque, Luchador y Soporte.
+- **Sapientia** (oeste, hacia el cañadón): empiezan Mago, Tirador y Asesino. Academia con cúpula, observatorio, torre del reloj y un engranaje gigante en la plaza.
+- Franjas de nivel (se ven abajo del minimapa y en los puntos de color):
+  - Nv 1–15 · animales cerca de las ciudades (conejo cornudo, jabalí, lobo, oso pardo).
+  - Nv 15–35 · humanoides en los caminos (bandidos, arqueros, jefe bandido), en empalizadas con arco de piedra.
+  - Nv 35–45 · orcos y goblins en las fronteras (goblin, hondero, orco, ogro), en empalizadas oscuras.
+  - Nv 45+ · criaturas de las cumbres del norte (gólem, espectro, troll de las nieves), entre ruinas.
+- Varios bichos sueltan ingredientes de cocina (panceta de jabalí, musgo de gólem…).
+- Cercos rústicos de madera en granjas y praderas: bloquean, pero los dashes los atraviesan.

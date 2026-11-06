@@ -14,6 +14,11 @@ const XP_MAX = 1000.0
 const B = 470.0                     # límite del mundo (el terreno mide 1 × 1 km)
 const SAFE = Vector2(0, 0)
 const SAFE_R = 52.0                 # la capital Lumen es zona segura
+# ciudades: zonas seguras y puntos de inicio
+const CITIES = {
+	"lumen": {"name": "Lumen", "pos": Vector2(0, 0), "r": 52.0, "spawn": Vector2(0, 6)},
+	"sapientia": {"name": "Sapientia", "pos": Vector2(-235, 40), "r": 46.0, "spawn": Vector2(-235, 58)},
+}
 const CELL = 2.0                    # tamaño de casillero de la grilla del mundo vivo
 const SAVE_PATH = "user://progreso.json"
 
@@ -52,6 +57,9 @@ class Player:
 
 class Mob:
 	var type := ""
+	var lvl := 1
+	var tier := 0
+	var mult := 1.0
 	var d := {}
 	var x := 0.0
 	var z := 0.0
@@ -192,6 +200,11 @@ var tree_grid := {}
 var falling: Array = []
 var regrowing: Array = []
 var wood := 0
+var ingredients := {}                # ingredientes de cocina que sueltan los bichos
+var camps: Array = []                # campamentos de monstruos (por franja de nivel)
+var fence_xf: Array = []             # postes de cercos (MultiMesh)
+var fence_col: Array = []
+var cur_zone := ""
 var colliders: Array = []          # muros y edificios: cajas en el plano (centro, medio tamaño, giro)
 var col_grid := {}                  # grilla de 16 m para buscar colisiones rápido
 var puddles: Array = []
@@ -353,6 +366,14 @@ func rank_mult(slot: String) -> float:
 
 func skill_cd(slot: String) -> float:
 	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1))
+
+# ¿el punto está dentro de alguna ciudad (más un margen)?
+func in_city(x: float, z: float, margin := 0.0) -> bool:
+	for k in CITIES:
+		var c: Dictionary = CITIES[k]
+		if Vector2(x, z).distance_to(c.pos) < c.r + margin:
+			return true
+	return false
 
 # altura del suelo (o del agua) en un punto
 func H(x: float, z: float) -> float:
@@ -523,6 +544,8 @@ func build_world() -> void:
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	world.add_child(water)
 	build_capital()
+	build_sapientia()
+	plan_camps()
 	build_structures()
 	build_vegetation()
 	# minimapa
@@ -565,7 +588,7 @@ func build_capital() -> void:
 			continue
 		var px := sin(a) * SAFE_R
 		var pz := cos(a) * SAFE_R
-		solid_box(Vector3(5.4, 5.0, 1.6), stone, Vector3(px, y0 + 2.5, pz), a + PI / 2)
+		solid_box(Vector3(5.4, 5.0, 1.6), stone, Vector3(px, y0 + 2.5, pz), a)
 		if k % 8 == 0:
 			cyl(1.8, 2.0, 8.0, stone, Vector3(px, y0 + 4.0, pz), world, 10)
 			add_collider(Vector2(px, pz), Vector2(1.9, 1.9), 0.0)
@@ -662,7 +685,7 @@ func dash_end(sx: float, sz: float, ex: float, ez: float) -> Vector2:
 # ----------------------------------------------------------------- construcciones dispersas
 func ok_site(x: float, z: float, r: float) -> bool:
 	var p := Vector2(x, z)
-	if p.length() < SAFE_R + 20.0 or terrain.road_dist(p) < r + 4.0 or terrain.river_dist(p) < r + 10.0:
+	if in_city(x, z, 20.0) or terrain.road_dist(p) < r + 4.0 or terrain.river_dist(p) < r + 10.0:
 		return false
 	if p.distance_to(Terrain.LAKE) < Terrain.LAKE_R + r + 15.0:
 		return false
@@ -733,7 +756,7 @@ func build_structures() -> void:
 		var fz := Vector2(sin(a), cos(a))
 		var corners = [f + fx * -9 + fz * 7, f + fx * 9 + fz * 7, f + fx * 9 + fz * 14, f + fx * -9 + fz * 14]
 		for k in 3:
-			wall_run(corners[k], corners[k + 1], 0.3, 1.1, wood, 0.0, r)
+			fence_run(corners[k], corners[k + 1], "rustico", r)
 		if farms == 2:
 			var mx := x + 14.0
 			cyl(1.8, 2.4, 10.0, Color("#e8dcc0"), Vector3(mx, H(mx, z) + 5, z), world, 8)
@@ -749,19 +772,342 @@ func build_structures() -> void:
 				blade.reparent(arm)
 				arm.rotation.z = k * PI / 2
 		farms += 1
-	# laberintos de muros cerca de los campamentos: pasillos para escaparse y emboscar
-	for camp in [Vector2(140, -75), Vector2(170, -130), Vector2(-70, -110), Vector2(70, 120), Vector2(-110, 90), Vector2(-170, 60), Vector2(190, 30)]:
-		for k in 3:
-			var a := r.randf() * TAU
-			var d := r.randf_range(12, 20)
-			var c: Vector2 = camp + Vector2(cos(a), sin(a)) * d
-			if not ok_site(c.x, c.y, 4) and c.length() > SAFE_R + 20:
-				if terrain.road_dist(c) < 5.0 or terrain.height(c.x, c.y) < 1.5:
+	# alrededor de cada campamento: cercos, empalizadas o ruinas según quién vive ahí
+	for cp in camps:
+		decorate_camp(cp, r, old)
+	finish_fences()
+
+# ----------------------------------------------------------------- campamentos por franja de nivel
+# Nv 1–15 animales cerca de las ciudades · 15–35 humanoides en los caminos ·
+# 35–45 orcos y goblins en las fronteras · 45+ criaturas en las cumbres del norte
+const CAMP_PLAN = [
+	# [tier, lvl_min, lvl_max, x, z, [[tipo, cantidad], ...]]
+	[0, 1, 3, -110, 90, [["conejo", 4]]],
+	[0, 1, 3, 60, -70, [["conejo", 4]]],
+	[0, 2, 6, -195, -25, [["conejo", 3], ["jabali", 1]]],
+	[0, 4, 8, 70, 120, [["jabali", 3]]],
+	[0, 5, 9, -70, -110, [["lobo", 4]]],
+	[0, 6, 10, 140, -75, [["lobo", 4]]],
+	[0, 6, 10, -290, 95, [["jabali", 3]]],
+	[0, 12, 15, 170, -130, [["oso", 1], ["lobo", 2]]],
+	[0, 13, 15, -160, 145, [["oso", 1]]],
+	[1, 16, 22, 40, 230, [["bandido", 3], ["arquero", 2]]],
+	[1, 18, 25, 225, 40, [["bandido", 3], ["arquero", 2]]],
+	[1, 20, 28, -120, 245, [["bandido", 3], ["arquero", 1]]],
+	[1, 22, 30, -60, -250, [["bandido", 2], ["arquero", 2]]],
+	[1, 28, 35, 200, -190, [["jefe", 1], ["bandido", 2], ["arquero", 2]]],
+	[1, 30, 35, -385, -60, [["jefe", 1], ["arquero", 2]]],
+	[2, 35, 40, 340, 100, [["goblin", 4], ["hondero", 2]]],
+	[2, 36, 40, 150, 340, [["goblin", 3], ["hondero", 2]]],
+	[2, 38, 43, 360, -150, [["orco", 3], ["goblin", 2]]],
+	[2, 38, 42, -240, 350, [["orco", 2], ["goblin", 2]]],
+	[2, 43, 45, 330, 300, [["ogro", 1], ["orco", 2]]],
+	[2, 42, 45, -450, 300, [["ogro", 1], ["goblin", 3]]],
+	[3, 46, 50, -60, -370, [["golem", 1]]],
+	[3, 47, 52, 150, -360, [["troll", 3]]],
+	[3, 48, 54, -300, -330, [["espectro", 3]]],
+	[3, 52, 58, 360, -360, [["golem", 1], ["troll", 2]]],
+]
+
+func site_ok(x: float, z: float, r: float) -> bool:
+	if in_city(x, z, 25.0) or terrain.road_dist(Vector2(x, z)) < 6.0 or terrain.river_dist(Vector2(x, z)) < 9.0:
+		return false
+	if terrain.height(x, z) < 1.5 or blocked(x, z, r):
+		return false
+	for dd in [Vector2(r, 0), Vector2(-r, 0), Vector2(0, r), Vector2(0, -r)]:
+		if abs(terrain.height(x + dd.x, z + dd.y) - terrain.height(x, z)) > r * 0.55:
+			return false
+	return true
+
+# busca el lugar libre más cercano en espiral
+func free_spot(p: Vector2, pad: float) -> Vector2:
+	if not blocked(p.x, p.y, pad):
+		return p
+	for ring in range(1, 40):
+		for k in 12:
+			var a := TAU * k / 12.0
+			var q := p + Vector2(cos(a), sin(a)) * ring * 1.5
+			if not blocked(q.x, q.y, pad) and terrain.height(q.x, q.y) > Terrain.WATER - 0.5:
+				return q
+	return p
+
+func plan_camps() -> void:
+	camps.clear()
+	for c in CAMP_PLAN:
+		var p := Vector2(c[3], c[4])
+		var found := p
+		var ok := site_ok(p.x, p.y, 8.0)
+		var ring := 1
+		while not ok and ring < 30:
+			for k in 16:
+				var a := TAU * k / 16.0
+				var q := p + Vector2(cos(a), sin(a)) * ring * 4.0
+				if site_ok(q.x, q.y, 8.0):
+					found = q
+					ok = true
+					break
+			ring += 1
+		camps.append({"tier": c[0], "lvl": [c[1], c[2]], "pos": found, "roster": c[5]})
+
+func zone_at(x: float, z: float) -> Dictionary:
+	if in_city(x, z):
+		var best := ""
+		for k in CITIES:
+			if Vector2(x, z).distance_to(CITIES[k].pos) < CITIES[k].r:
+				best = CITIES[k].name
+		return {"name": best, "tier": -1}
+	if z < -290.0:
+		return {"name": "Cumbres del Norte", "tier": 3}
+	var dl := Vector2(x, z).distance_to(CITIES.lumen.pos)
+	var ds := Vector2(x, z).distance_to(CITIES.sapientia.pos)
+	var d: float = min(dl, ds)
+	if d < 170.0:
+		return {"name": "Praderas de Lumen" if dl < ds else "Llanos de Sapientia", "tier": 0}
+	if d < 300.0:
+		return {"name": "Caminos sin ley", "tier": 1}
+	return {"name": "Fronteras orcas", "tier": 2}
+
+# cercos: "rustico" (postes y travesaños, como de granja), "empalizada" (troncos en punta)
+# y "orca" (empalizada oscura). Bloquean el paso, pero los dashes los atraviesan.
+func fence_run(a: Vector2, b: Vector2, style: String, r: RandomNumberGenerator) -> void:
+	var L := a.distance_to(b)
+	if L < 0.5:
+		return
+	var dir := (b - a) / L
+	var rot := atan2(dir.x, dir.y) + PI / 2
+	var step := 0.95 if style == "rustico" else 0.55
+	var n := int(L / step) + 1
+	var base := Color("#6e5a3a") if style != "orca" else Color("#3e3326")
+	var hgt := 1.5 if style == "rustico" else (3.0 if style == "empalizada" else 3.4)
+	var rad := 0.13 if style == "rustico" else 0.24
+	for i in n:
+		var c: Vector2 = a + dir * (L * i / float(maxi(1, n - 1)))
+		var hh: float = hgt * r.randf_range(0.85, 1.12)
+		var gy := H(c.x, c.y)
+		var bs := Basis.from_euler(Vector3(r.randf_range(-0.06, 0.06), r.randf() * TAU, r.randf_range(-0.06, 0.06))).scaled(Vector3(rad, hh, rad))
+		fence_xf.append(Transform3D(bs, Vector3(c.x, gy + hh / 2.0 - 0.15, c.y)))
+		var tint := base.lerp(Color("#5c6b3a"), r.randf() * 0.45)       # musgo
+		fence_col.append(tint)
+		if style != "rustico":
+			var tip := Basis.from_euler(Vector3(0, r.randf() * TAU, 0)).scaled(Vector3(rad, 0.5, rad))
+			fence_xf.append(Transform3D(tip, Vector3(c.x, gy + hh - 0.15 + 0.25, c.y)))
+			fence_col.append(tint.darkened(0.15) if style == "empalizada" else Color("#d9d2bf"))
+	if style == "rustico":
+		for yy in [0.55, 1.1]:
+			var mid := (a + b) / 2.0
+			var rail := box(Vector3(L, 0.12, 0.12), Color("#7a6040"), Vector3(mid.x, (H(a.x, a.y) + H(b.x, b.y)) / 2.0 + yy, mid.y), world)
+			rail.rotation.y = rot
+	add_collider((a + b) / 2.0, Vector2(L / 2.0, 0.3 if style == "rustico" else 0.4), rot)
+
+func finish_fences() -> void:
+	if fence_xf.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	var cm := CylinderMesh.new()
+	cm.top_radius = 1.0
+	cm.bottom_radius = 1.0
+	cm.height = 1.0
+	cm.radial_segments = 6
+	cm.rings = 1
+	mm.mesh = cm
+	mm.instance_count = fence_xf.size()
+	for i in fence_xf.size():
+		mm.set_instance_transform(i, fence_xf[i])
+		mm.set_instance_color(i, fence_col[i])
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 0.95
+	mi.material_override = m
+	world.add_child(mi)
+
+# arco de piedra con dintel de madera (entrada de campamento)
+func stone_gate(c: Vector2, rot: float) -> void:
+	var dx := Vector2(cos(rot), -sin(rot))
+	var y := H(c.x, c.y)
+	for sgn in [-1.0, 1.0]:
+		var q: Vector2 = c + dx * 2.6 * sgn
+		solid_box(Vector3(1.4, 4.2, 1.4), Color("#bdb39a"), Vector3(q.x, H(q.x, q.y) + 2.0, q.y), rot)
+	var lintel := box(Vector3(7.2, 0.6, 0.7), Color("#6b5234"), Vector3(c.x, y + 4.4, c.y), world)
+	lintel.rotation.y = rot
+	var sign_b := box(Vector3(2.0, 0.8, 0.12), Color("#7a6040"), Vector3(c.x, y + 3.6, c.y), world)
+	sign_b.rotation.y = rot
+
+func decorate_camp(cp: Dictionary, r: RandomNumberGenerator, old: Color) -> void:
+	var c: Vector2 = cp.pos
+	var to_road := (Vector2.ZERO - c).normalized()      # la entrada mira hacia el centro del reino
+	var open_a := atan2(to_road.y, to_road.x)
+	match int(cp.tier):
+		0:
+			# animales: cercos rústicos de pastoreo, sueltos, para esconderse y hacer pasillos
+			for k in 3:
+				var a := r.randf() * TAU
+				var d := r.randf_range(12, 19)
+				var q: Vector2 = c + Vector2(cos(a), sin(a)) * d
+				if in_city(q.x, q.y, 12.0) or terrain.road_dist(q) < 4.0 or terrain.height(q.x, q.y) < 1.5:
 					continue
-			var dir := Vector2(cos(a + PI / 2), sin(a + PI / 2))
-			wall_run(c - dir * 6, c + dir * 6, 1.2, 2.6, old, 0.0, r)
-			if k == 0:
-				wall_run(c + dir * 6, c + dir * 6 + Vector2(-dir.y, dir.x) * 6, 1.2, 2.6, old, 0.0, r)
+				var t := Vector2(cos(a + PI / 2), sin(a + PI / 2))
+				fence_run(q - t * 6, q + t * 6, "rustico", r)
+				if k == 0:
+					fence_run(q + t * 6, q + t * 6 + Vector2(-t.y, t.x) * 5, "rustico", r)
+		1, 2:
+			# bandidos u orcos: empalizada en arco con una entrada; fogata y carpas adentro
+			var style := "empalizada" if int(cp.tier) == 1 else "orca"
+			var R := 15.0
+			var segs := 14
+			for k in segs:
+				var a0 := open_a + 0.45 + (TAU - 0.9) * k / segs
+				var a1 := open_a + 0.45 + (TAU - 0.9) * (k + 1) / segs
+				var p0 := c + Vector2(cos(a0), sin(a0)) * R
+				var p1 := c + Vector2(cos(a1), sin(a1)) * R
+				if terrain.height(p0.x, p0.y) < 1.0 or terrain.road_dist(p0) < 3.0:
+					continue
+				fence_run(p0, p1, style, r)
+			var gate := c + to_road * R
+			if int(cp.tier) == 1:
+				stone_gate(gate, atan2(to_road.x, to_road.y) + PI / 2)
+			else:
+				for sgn in [-1.0, 1.0]:
+					var q: Vector2 = gate + Vector2(-to_road.y, to_road.x) * 2.4 * sgn
+					cyl(0.25, 0.3, 5.0, Color("#3e3326"), Vector3(q.x, H(q.x, q.y) + 2.5, q.y), world, 6)
+					box(Vector3(0.7, 0.6, 0.6), Color("#d9d2bf"), Vector3(q.x, H(q.x, q.y) + 5.2, q.y), world)
+			var fire := c + Vector2(r.randf_range(-2, 2), r.randf_range(-2, 2))
+			cyl(0.9, 1.1, 0.3, Color("#5a5048"), Vector3(fire.x, H(fire.x, fire.y) + 0.15, fire.y), world, 8)
+			var fl := sphere(0.55, Color("#ff9b50"), Vector3(fire.x, H(fire.x, fire.y) + 0.6, fire.y), world)
+			fl.material_override.emission_enabled = true
+			fl.material_override.emission = Color("#ff7a30")
+			fl.material_override.emission_energy_multiplier = 1.6
+			for k in 3:
+				var a := open_a + PI + (k - 1) * 0.9
+				var q := c + Vector2(cos(a), sin(a)) * 9.5
+				var tc := Color("#a8875c") if int(cp.tier) == 1 else Color("#5b4a38")
+				cyl(0.05, 2.2, 2.6, tc, Vector3(q.x, H(q.x, q.y) + 1.3, q.y), world, 4).rotation.y = r.randf()
+				add_collider(q, Vector2(1.5, 1.5), 0.0)
+		3:
+			# cumbres: ruinas antiguas de piedra
+			for k in 3:
+				var a := r.randf() * TAU
+				var q: Vector2 = c + Vector2(cos(a), sin(a)) * r.randf_range(13, 20)
+				var t := Vector2(cos(a + PI / 2), sin(a + PI / 2))
+				wall_run(q - t * 7, q + t * 7, 1.4, 3.4, old, 0.25, r)
+
+# Sapientia, ciudad del conocimiento: arenisca, techos de bronce, cúpulas de cristal,
+# una academia, un observatorio, la torre del reloj, talleres y un engranaje gigante en la plaza
+func build_sapientia() -> void:
+	var C: Vector2 = CITIES.sapientia.pos
+	var R: float = CITIES.sapientia.r
+	var y0 := H(C.x, C.y)
+	var sand := Color("#e0caa0")
+	var sand2 := Color("#c9ad7e")
+	var bronze := Color("#b8733a")
+	var glass := Color("#5fb3b0")
+	var exits := []
+	for road in Terrain.ROADS:
+		for i in road.size():
+			if road[i].distance_to(C) < R + 60.0:
+				var nb: Vector2 = road[i]
+				exits.append(atan2(nb.x - C.x, nb.y - C.y))
+	exits.append(atan2(-150.0 - C.x, 25.0 - C.y))     # hacia Lumen
+	exits.append(atan2(-280.0 - C.x, 50.0 - C.y))     # hacia el cañadón
+	# muralla baja con almenas de bronce
+	var segs := 56
+	for k in segs:
+		var a := TAU * k / segs
+		var gap := false
+		for e in exits:
+			if abs(angle_difference(a, e)) < 0.2:
+				gap = true
+		if gap:
+			continue
+		var px := C.x + sin(a) * R
+		var pz := C.y + cos(a) * R
+		solid_box(Vector3(5.6, 4.0, 1.4), sand, Vector3(px, y0 + 2.0, pz), a)
+		if k % 7 == 0:
+			cyl(1.6, 1.8, 6.5, sand2, Vector3(px, y0 + 3.25, pz), world, 8)
+			sphere(1.7, bronze, Vector3(px, y0 + 6.8, pz), world)
+			add_collider(Vector2(px, pz), Vector2(1.7, 1.7), 0.0)
+	# academia: edificio central con cúpula de cristal
+	var ac := C + Vector2(0, -16)
+	solid_box(Vector3(22, 9, 14), sand, Vector3(ac.x, y0 + 4.5, ac.y), 0.0)
+	box(Vector3(23, 0.8, 15), bronze, Vector3(ac.x, y0 + 9.2, ac.y), world)
+	cyl(5.5, 5.8, 4.0, sand2, Vector3(ac.x, y0 + 11.5, ac.y), world, 16)
+	var dome := sphere(5.6, glass, Vector3(ac.x, y0 + 13.5, ac.y), world)
+	dome.material_override.metallic = 0.3
+	dome.material_override.roughness = 0.25
+	cyl(0.2, 0.2, 3.0, bronze, Vector3(ac.x, y0 + 20.5, ac.y), world, 6)
+	for col in [-8, -4, 0, 4, 8]:
+		cyl(0.55, 0.6, 8.0, Color("#f0e2c4"), Vector3(ac.x + col, y0 + 4.0, ac.y + 7.6), world, 10)
+	# observatorio: torre alta con cúpula y telescopio
+	var ob := C + Vector2(-26, 8)
+	cyl(3.2, 3.8, 18.0, sand2, Vector3(ob.x, y0 + 9.0, ob.y), world, 12)
+	add_collider(ob, Vector2(3.6, 3.6), 0.0)
+	sphere(3.4, bronze, Vector3(ob.x, y0 + 18.5, ob.y), world)
+	var tel := cyl(0.45, 0.7, 5.0, Color("#3b3b46"), Vector3(ob.x + 1.6, y0 + 20.5, ob.y), world, 8)
+	tel.rotation.z = -0.9
+	# torre del reloj
+	var tw := C + Vector2(24, 4)
+	solid_box(Vector3(5, 20, 5), sand, Vector3(tw.x, y0 + 10, tw.y), 0.0)
+	cyl(0.01, 4.0, 4.0, bronze, Vector3(tw.x, y0 + 22, tw.y), world, 4).rotation.y = PI / 4
+	var face := cyl(1.8, 1.8, 0.3, Color("#f7f1e3"), Vector3(tw.x, y0 + 16, tw.y + 2.6), world, 20)
+	face.rotation.x = PI / 2
+	var hand := Node3D.new()
+	hand.name = "AgujaReloj"
+	hand.position = Vector3(tw.x, y0 + 16, tw.y + 2.8)
+	world.add_child(hand)
+	box(Vector3(0.18, 1.5, 0.08), Color("#2b2b2b"), Vector3(0, 0.6, 0), hand)
+	# engranaje gigante en la plaza (gira)
+	var gear := Node3D.new()
+	gear.name = "Engranaje"
+	gear.position = Vector3(C.x, y0 + 4.5, C.y + 6)
+	world.add_child(gear)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 2.4
+	tm.outer_radius = 3.2
+	tm.rings = 24
+	ring.mesh = tm
+	ring.material_override = mat(bronze)
+	ring.rotation.x = PI / 2
+	gear.add_child(ring)
+	for k in 12:
+		var tooth := box(Vector3(0.7, 0.9, 0.6), bronze, Vector3(sin(TAU * k / 12) * 3.5, cos(TAU * k / 12) * 3.5, 0), gear)
+		tooth.rotation.z = -TAU * k / 12
+	box(Vector3(0.8, 4.5, 0.8), sand2, Vector3(C.x, y0 + 2.2, C.y + 6), world)
+	add_collider(C + Vector2(0, 6), Vector2(0.8, 0.8), 0.0)
+	# talleres con chimenea y casas con techo de bronce
+	var r := RandomNumberGenerator.new()
+	r.seed = 1234
+	var placed := 0
+	var tries := 0
+	while placed < 13 and tries < 400:
+		tries += 1
+		var a := r.randf() * TAU
+		var d := r.randf_range(14.0, R - 7.0)
+		var x := C.x + sin(a) * d
+		var z := C.y + cos(a) * d
+		if terrain.road_dist(Vector2(x, z)) < 5.5 or blocked(x, z, 4.5):
+			continue
+		if Vector2(x, z).distance_to(CITIES.sapientia.spawn) < 9.0 or Vector2(x, z).distance_to(C + Vector2(0, 6)) < 9.0:
+			continue
+		var w := r.randf_range(4.5, 7.0)
+		var hgt := r.randf_range(3.5, 6.0)
+		solid_box(Vector3(w, hgt, w * 0.85), sand.darkened(r.randf() * 0.1), Vector3(x, y0 + hgt / 2, z), a)
+		if placed % 3 == 0:
+			cyl(0.5, 0.6, 3.5, Color("#5a4a3a"), Vector3(x + 1.2, y0 + hgt + 1.5, z), world, 6)
+			box(Vector3(w + 0.2, 0.5, w * 0.85 + 0.2), bronze, Vector3(x, y0 + hgt + 0.2, z), world).rotation.y = a
+		else:
+			cyl(0.01, w * 0.75, 2.0, bronze.lightened(r.randf() * 0.15), Vector3(x, y0 + hgt + 1.0, z), world, 4).rotation.y = a + PI / 4
+		placed += 1
+	var safe := MeshInstance3D.new()
+	safe.mesh = ring_mesh
+	safe.material_override = ind_mat(Color("#58a6ff"), 0.35)
+	safe.material_override.no_depth_test = false
+	safe.scale = Vector3(R + 2.5, 0.05, R + 2.5)
+	safe.position = Vector3(C.x, y0 + 0.08, C.y)
+	world.add_child(safe)
 
 # árboles y rocas con MultiMesh: miles de copias en pocas llamadas de dibujo
 const SPECIES = ["pino", "redondo", "abedul", "otono"]
@@ -874,7 +1220,7 @@ func build_vegetation() -> void:
 				var size := 0 if q < 0.4 else (1 if q < 0.92 or dens < 0.25 else 2)
 				var sc: float = [r.randf_range(0.45, 0.7), r.randf_range(0.85, 1.3), r.randf_range(1.9, 2.6)][size]
 				add_tree(px, pz, pick_species(px, pz, r), size, sc, r.randf() * TAU)
-			elif r.randf() < 0.012 and terrain.height(px, pz) > 1.0 and terrain.road_dist(Vector2(px, pz)) > 6.0 and Vector2(px, pz).length() > SAFE_R + 10:
+			elif r.randf() < 0.012 and terrain.height(px, pz) > 1.0 and terrain.road_dist(Vector2(px, pz)) > 6.0 and not in_city(px, pz, 10.0):
 				var sc := r.randf_range(0.5, 1.8) * (2.0 if px < -250.0 else 1.0)
 				rocks.append(Transform3D(Basis(Vector3(r.randf(), 1, r.randf()).normalized(), r.randf() * TAU).scaled(Vector3(sc, sc * 0.7, sc)), Vector3(px, terrain.height(px, pz), pz)))
 			z += step
@@ -999,7 +1345,7 @@ func build_ground_cover() -> void:
 				if h < 0.9 or h > 40.0:
 					continue
 				var p := Vector2(x, z)
-				if terrain.road_dist(p) < 3.5 or p.length() < SAFE_R + 2.0 or blocked(x, z, 0.4):
+				if terrain.road_dist(p) < 3.5 or in_city(x, z, 2.0) or blocked(x, z, 0.4):
 					continue
 				var i := int((x + Terrain.HALF) / Terrain.RES)
 				var j := int((z + Terrain.HALF) / Terrain.RES)
@@ -1192,18 +1538,26 @@ func spawn_mobs() -> void:
 	mobs.clear()
 	var r := RandomNumberGenerator.new()
 	r.seed = 5
-	# campamentos alrededor de la capital: más fuertes cuanto más lejos
-	var camps = [["lobo", 140, -75, 4], ["lobo", 170, -130, 4], ["lobo", -70, -110, 4], ["lobo", 70, 120, 4], ["lobo", -110, 90, 3],
-		["arquero", -170, 60, 3], ["arquero", -240, -20, 3], ["arquero", 190, 30, 3], ["arquero", 40, 230, 2],
-		["ogro", -60, -230, 1], ["ogro", 270, -170, 1], ["ogro", -300, 120, 1]]
-	for c in camps:
-		for i in c[3]:
-			mobs.append(make_mob(c[0], c[1] + r.randf_range(-4, 4), c[2] + r.randf_range(-4, 4)))
+	# campamentos por franja de nivel
+	for cp in camps:
+		for entry in cp.roster:
+			for i in int(entry[1]):
+				var lv := r.randi_range(int(cp.lvl[0]), int(cp.lvl[1]))
+				var q := free_spot(cp.pos + Vector2(r.randf_range(-5, 5), r.randf_range(-5, 5)), 1.0)
+				var m := make_mob(entry[0], q.x, q.y, lv)
+				m.tier = int(cp.tier)
+				mobs.append(m)
 
-func make_mob(type: String, x: float, z: float) -> Mob:
+func make_mob(type: String, x: float, z: float, lvl := 5) -> Mob:
 	var m := Mob.new()
 	m.type = type
-	m.d = Data.MOBDEF[type]
+	m.lvl = lvl
+	m.d = Data.MOBDEF[type].duplicate(true)
+	# el nivel escala vida, daño y maestría (curva suave: la habilidad sigue importando)
+	m.mult = 1.0 + 0.025 * (lvl - 5)
+	m.d.hp = m.d.hp * (1.0 + 0.03 * (lvl - 5))
+	m.d.dmg = m.d.dmg * m.mult
+	m.d.xp = int(round(m.d.xp * (1.0 + 0.02 * (lvl - 5))))
 	m.x = x
 	m.z = z
 	m.sx = x
@@ -1215,18 +1569,95 @@ func make_mob(type: String, x: float, z: float) -> Mob:
 	m.node = Node3D.new()
 	world.add_child(m.node)
 	var parts := []
-	if type == "lobo":
-		parts.append(box(Vector3(0.8, 0.8, 1.8), m.d.color, Vector3(0, 0.7, 0), m.node))
-		parts.append(box(Vector3(0.6, 0.6, 0.7), Color("#5e636b"), Vector3(0, 1.0, 1.1), m.node))
-	elif type == "arquero":
-		parts.append(cyl(0.45, 0.5, 1.5, m.d.color, Vector3(0, 0.9, 0), m.node, 8))
-		parts.append(sphere(0.36, Color("#3a2a1a"), Vector3(0, 1.9, 0), m.node))
-		box(Vector3(0.1, 1.2, 0.1), Color("#5b3a1e"), Vector3(0.3, 1.2, 0.5), m.node)
-	else:
-		parts.append(box(Vector3(2.4, 2.6, 1.8), m.d.color, Vector3(0, 1.7, 0), m.node))
-		parts.append(box(Vector3(1.2, 1.1, 1.1), Color("#9b7653"), Vector3(0, 3.5, 0), m.node))
-		var club := cyl(0.3, 0.5, 2.6, Color("#4a3a2a"), Vector3(1.6, 1.6, 0.6), m.node, 6)
-		club.rotation.x = 0.6
+	var col: Color = m.d.color
+	var acc: Color = m.d.get("accent", col.darkened(0.3))
+	var s: float = m.d.get("size", 1.0)
+	match String(m.d.get("body", "brute")):
+		"quad":
+			parts.append(box(Vector3(0.8, 0.8, 1.8) * s, col, Vector3(0, 0.75 * s, 0), m.node))
+			parts.append(box(Vector3(0.62, 0.6, 0.7) * s, col.darkened(0.15), Vector3(0, 1.05 * s, 1.1 * s), m.node))
+			for lx in [-0.28, 0.28]:
+				for lz in [-0.6, 0.6]:
+					box(Vector3(0.2, 0.5, 0.2) * s, col.darkened(0.3), Vector3(lx * s, 0.25 * s, lz * s), m.node)
+			if type == "conejo":
+				var horn := cyl(0.01, 0.09, 0.6, acc, Vector3(0, 1.55 * s, 1.25 * s), m.node, 6)
+				horn.rotation.x = 0.5
+				for ex in [-0.15, 0.15]:
+					box(Vector3(0.1, 0.55, 0.12) * s, col, Vector3(ex * s, 1.55 * s, 0.95 * s), m.node)
+			elif type == "jabali":
+				for tx in [-0.22, 0.22]:
+					var tusk := cyl(0.01, 0.06, 0.35, acc, Vector3(tx * s, 0.9 * s, 1.5 * s), m.node, 5)
+					tusk.rotation.x = -1.0
+				box(Vector3(0.12, 0.25, 1.2) * s, col.darkened(0.4), Vector3(0, 1.25 * s, 0), m.node)
+			elif type == "oso":
+				box(Vector3(0.3, 0.3, 0.3) * s, acc, Vector3(0, 1.0 * s, 1.5 * s), m.node)
+				for ex in [-0.2, 0.2]:
+					sphere(0.12 * s, col, Vector3(ex * s, 1.42 * s, 1.0 * s), m.node)
+			else:
+				for ex in [-0.18, 0.18]:
+					box(Vector3(0.12, 0.3, 0.1) * s, acc, Vector3(ex * s, 1.45 * s, 0.95 * s), m.node)
+		"biped":
+			var ghost := type == "espectro"
+			if not ghost:
+				for lx in [-0.18, 0.18]:
+					box(Vector3(0.22, 0.6, 0.24) * s, col.darkened(0.35), Vector3(lx * s, 0.3 * s, 0), m.node)
+			var torso := cyl(0.42 * s, 0.5 * s, 1.2 * s, col, Vector3(0, (1.6 if ghost else 1.15) * s, 0), m.node, 8)
+			parts.append(torso)
+			box(Vector3(0.95, 0.2, 0.95) * s, acc, Vector3(0, (1.3 if ghost else 0.9) * s, 0), m.node)
+			var skin := Color("#d9a77c")
+			if type in ["goblin", "hondero"]:
+				skin = Color("#8fbf4f")
+			elif type == "orco":
+				skin = Color("#7f9a62")
+			elif ghost:
+				skin = Color("#e6e1ff")
+			var head := sphere(0.34 * s, skin, Vector3(0, (2.45 if ghost else 2.0) * s, 0), m.node)
+			parts.append(head)
+			if type in ["goblin", "hondero"]:
+				for ex in [-1.0, 1.0]:
+					var ear := box(Vector3(0.45, 0.1, 0.15) * s, skin, Vector3(ex * 0.4 * s, 2.05 * s, 0), m.node)
+					ear.rotation.z = ex * -0.4
+			if type == "orco":
+				for tx in [-0.1, 0.1]:
+					box(Vector3(0.06, 0.16, 0.06) * s, Color("#f0ead6"), Vector3(tx * s, 1.9 * s, 0.3 * s), m.node)
+			if type in ["bandido", "arquero", "jefe"]:
+				box(Vector3(0.7, 0.18, 0.7) * s, acc, Vector3(0, 1.75 * s, 0), m.node)      # pañuelo
+			if ghost:
+				torso.material_override.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				torso.material_override.emission_enabled = true
+				torso.material_override.emission = col
+				torso.material_override.emission_energy_multiplier = 0.6
+				var tail := cyl(0.5 * s, 0.05, 1.1 * s, col, Vector3(0, 0.6 * s, 0), m.node, 8)
+				tail.material_override.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				tail.material_override.albedo_color.a = 0.6
+			match String(m.d.get("weapon", "")):
+				"espada", "daga":
+					var bl := box(Vector3(0.08, 0.9 if m.d.weapon == "espada" else 0.5, 0.18) * s, Color("#c9ccd1"), Vector3(0.55 * s, 1.2 * s, 0.4 * s), m.node)
+					bl.rotation.x = 0.8
+				"arco":
+					box(Vector3(0.1, 1.2, 0.1) * s, Color("#5b3a1e"), Vector3(0.45 * s, 1.3 * s, 0.4 * s), m.node)
+				"honda":
+					sphere(0.12 * s, Color("#8a8a82"), Vector3(0.45 * s, 1.5 * s, 0.3 * s), m.node)
+				"hacha":
+					var hd := cyl(0.06 * s, 0.08 * s, 1.4 * s, Color("#4a3a2a"), Vector3(0.6 * s, 1.3 * s, 0.4 * s), m.node, 6)
+					hd.rotation.x = 0.6
+					box(Vector3(0.1, 0.45, 0.5) * s, Color("#9aa0a6"), Vector3(0.6 * s, 1.85 * s, 0.75 * s), m.node)
+		_:
+			parts.append(box(Vector3(2.4, 2.6, 1.8) * s, col, Vector3(0, 1.7 * s, 0), m.node))
+			parts.append(box(Vector3(1.2, 1.1, 1.1) * s, acc if type == "ogro" else col.darkened(0.15), Vector3(0, 3.5 * s, 0), m.node))
+			for ax in [-1.0, 1.0]:
+				parts.append(box(Vector3(0.7, 2.2, 0.7) * s, col.darkened(0.1), Vector3(ax * 1.55 * s, 1.6 * s, 0), m.node))
+			if type == "golem":
+				for ax in [-1.0, 1.0]:
+					box(Vector3(0.9, 0.3, 0.9) * s, acc, Vector3(ax * 1.55 * s, 2.8 * s, 0), m.node)       # musgo
+				var eye := box(Vector3(0.8, 0.15, 0.1) * s, Color("#7ee7ff"), Vector3(0, 3.6 * s, 0.56 * s), m.node)
+				eye.material_override.emission_enabled = true
+				eye.material_override.emission = Color("#7ee7ff")
+			elif type == "troll":
+				box(Vector3(1.0, 0.5, 0.4) * s, Color("#e8f0f8"), Vector3(0, 4.15 * s, 0), m.node)
+			else:
+				var club := cyl(0.3, 0.5, 2.6, Color("#4a3a2a"), Vector3(1.6 * s, 1.6 * s, 0.6 * s), m.node, 6)
+				club.rotation.x = 0.6
 	for p in parts:
 		m.mats.append(p.material_override)
 		m.base_colors.append(p.material_override.albedo_color)
@@ -1235,6 +1666,10 @@ func make_mob(type: String, x: float, z: float) -> Mob:
 
 func spawn_player() -> void:
 	P = Player.new()
+	var city: Dictionary = CITIES[weapon.get("start", "lumen")]
+	var sp := free_spot(city.spawn, 1.0)
+	P.x = sp.x
+	P.z = sp.y
 	P.hp = weapon.hp
 	P.max_hp = weapon.hp
 	P.speed = weapon.speed
@@ -1370,8 +1805,8 @@ func build_living_world() -> void:
 	# pasto alto: esconde al que está adentro y se puede quemar
 	var r := RandomNumberGenerator.new()
 	r.seed = 31
-	for camp in [Vector2(140, -75), Vector2(170, -130), Vector2(-70, -110), Vector2(70, 120), Vector2(-110, 90),
-			Vector2(-170, 60), Vector2(-240, -20), Vector2(190, 30), Vector2(40, 230), Vector2(-60, -230), Vector2(270, -170), Vector2(-300, 120)]:
+	for cp in camps:
+		var camp: Vector2 = cp.pos
 		for k in 2:
 			var a := r.randf() * TAU
 			var d := r.randf_range(10, 22)
@@ -1402,7 +1837,7 @@ func add_grass(cx: float, cz: float, w: int, h: int) -> void:
 			c.x = i * CELL + CELL / 2
 			c.z = j * CELL + CELL / 2
 			var p := Vector2(c.x, c.z)
-			if terrain.height(c.x, c.z) < 0.8 or p.length() < SAFE_R + 3.0 or terrain.road_dist(p) < 2.5 or blocked(c.x, c.z, 0.3):
+			if terrain.height(c.x, c.z) < 0.8 or in_city(c.x, c.z, 3.0) or terrain.road_dist(p) < 2.5 or blocked(c.x, c.z, 0.3):
 				continue
 			c.base_y = terrain.height(c.x, c.z)
 			c.tint = Color("#3f8a2e").lerp(Color("#5aa83c"), randf())
@@ -1758,7 +2193,10 @@ func update_ui() -> void:
 		st = "¡Te quemás!"
 	elif P.hidden:
 		st = "En el pasto: oculto"
-	chips_lbl.text = "%s ✓   %s   Madera: %d   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", wood, st]
+	var ning := 0
+	for f in ingredients:
+		ning += int(ingredients[f])
+	chips_lbl.text = "%s ✓   %s   Madera: %d   Ingredientes: %d   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", wood, ning, st]
 	for slot in ACT:
 		var b: Button = skill_btns[slot]
 		var r := int(R()[slot])
@@ -1932,8 +2370,8 @@ func show_picker() -> void:
 		var wt: String = pick_w if pick_w != null else c.natural
 		var nat: bool = wt == c.natural
 		var r := ranks_of(c.id)
-		var txt := "%s — %s\nInicial · Maestría %d%%\nArma: %s%s\n\nPasiva: %s\nH1 %s · r%d/8\nH2 %s · r%d/6\nH3 %s · r%d/4\nDef. %s · r%d/3" % [
-			c.cls.to_upper(), c.style, int(pct(style_key(c.id))), Data.WTYPES[wt].name, "" if nat else " (no natural: básico −40%)",
+		var txt := "%s — %s\nInicial · Maestría %d%% · Empieza en %s\nArma: %s%s\n\nPasiva: %s\nH1 %s · r%d/8\nH2 %s · r%d/6\nH3 %s · r%d/4\nDef. %s · r%d/3" % [
+			c.cls.to_upper(), c.style, int(pct(style_key(c.id))), CITIES[c.start].name, Data.WTYPES[wt].name, "" if nat else " (no natural: básico −40%)",
 			c.passive.name, c.s1.name, r.s1, c.s2.name, r.s2, c.s3.name, r.s3, c.ult.name, r.ult]
 		var b := mk_button(txt, choose.bind(c.id, wt), 12)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -1970,7 +2408,7 @@ func choose(id: String, wt: String) -> void:
 	running = true
 	name_lbl.text = "%s · %s" % [weapon.cls, weapon.style]
 	name_lbl.add_theme_color_override("font_color", weapon.color)
-	sub_lbl.text = "Imperio de la Luz · Inicial · %s%s" % [weapon.wname, "" if weapon.natural else " (no natural: básico −40%)"]
+	sub_lbl.text = "Imperio de la Luz · %s · Inicial · %s%s" % [CITIES[weapon.start].name, weapon.wname, "" if weapon.natural else " (no natural: básico −40%)"]
 	refresh_mastery()
 	if free_pts() > 0:
 		toast("Tenés %d punto(s) para repartir (P)" % free_pts())
@@ -2422,6 +2860,10 @@ func kill(m: Mob) -> void:
 		m.slam = null
 	clear_tele(m)
 	flash_fx("ring", m.x, m.z, m.d.r * 2, Vector2(0, 1), Color("#f2cc60"))
+	var food: String = m.d.get("food", "")
+	if food != "" and randf() < 0.6:
+		ingredients[food] = int(ingredients.get(food, 0)) + 1
+		add_text(Vector3(m.x, m.d.r * 2 + 3.4, m.z), "+ " + food, Color("#7ee787"), 13)
 	var k := sk()
 	var before := pct(k)
 	var pts_b := total_pts(before)
@@ -2592,6 +3034,14 @@ func _process(dt: float) -> void:
 	overlay.queue_redraw()
 
 func update_game(dt: float) -> void:
+	var zc_ := zone_at(P.x, P.z)
+	if zc_.name != cur_zone:
+		if cur_zone != "":
+			if zc_.tier >= 0:
+				toast("%s · %s Nv %d–%d" % [zc_.name, Data.TIERS[zc_.tier].name, Data.TIERS[zc_.tier].lvl[0], Data.TIERS[zc_.tier].lvl[1]])
+			else:
+				toast("Entrás a %s · zona segura" % zc_.name)
+		cur_zone = zc_.name
 	for k in P.cds:
 		P.cds[k] = max(0.0, P.cds[k] - dt)
 	P.weave = max(0.0, P.weave - dt)
@@ -2742,7 +3192,7 @@ func update_game(dt: float) -> void:
 	update_ui()
 
 func update_mobs(dt: float) -> void:
-	var in_safe := Vector2(P.x, P.z).distance_to(SAFE) < SAFE_R
+	var in_safe := in_city(P.x, P.z)
 	for m in mobs:
 		if m.dead > 0:
 			m.dead -= dt
@@ -2783,16 +3233,16 @@ func update_mobs(dt: float) -> void:
 			var n := Vector2(P.x - m.x, P.z - m.z).normalized()
 			m.fx = n.x
 			m.fz = n.y
-			if m.type == "ogro":
+			if m.d.ai == "brute":
 				if m.slam:
 					m.slam.t -= dt
 					tele_progress(m.slam.node, dt)
 					if m.slam.t <= 0:
 						if m.slam.kind == "circle" and dP < m.slam.r + 0.5:
-							hurt_player(75, "boss")
+							hurt_player(75 * m.mult, "boss")
 						if m.slam.kind == "cone":
 							if dP < m.slam.r + 0.5 and abs(angle_difference(atan2(P.x - m.x, P.z - m.z), m.slam.a)) < 0.6:
-								hurt_player(45, "boss")
+								hurt_player(45 * m.mult, "boss")
 						flash_fx("disc" if m.slam.kind == "circle" else "sector:70", m.x, m.z, m.slam.r, Vector2(sin(m.slam.a), cos(m.slam.a)), Color("#f85149"))
 						m.slam.node.queue_free()
 						m.slam = null
@@ -2825,7 +3275,7 @@ func update_mobs(dt: float) -> void:
 						g.set_meta("line", false)
 						m.slam = {"kind": "cone", "r": 7.0, "a": a, "t": 0.75, "node": g}
 					continue
-			if m.type == "arquero":
+			if m.d.ai == "ranged":
 				if m.wind > 0:
 					m.wind -= dt
 					if m.tele:
@@ -3069,6 +3519,12 @@ func render_frame() -> void:
 	var aspas = world.get_node_or_null("Aspas")
 	if aspas:
 		aspas.rotation.z += get_process_delta_time() * 0.8
+	var eng = world.get_node_or_null("Engranaje")
+	if eng:
+		eng.rotation.z += get_process_delta_time() * 0.4
+	var aguja = world.get_node_or_null("AgujaReloj")
+	if aguja:
+		aguja.rotation.z -= get_process_delta_time() * 0.2
 	for m in mobs:
 		if m.dead > 0:
 			continue
@@ -3108,13 +3564,17 @@ func draw_overlay() -> void:
 	for m in mobs:
 		if m.dead > 0:
 			continue
-		if m.hp >= m.max_hp and m.type != "ogro" and m.mark <= 0 and m.stun_t <= 0:
+		var near: bool = d2(P.x, P.z, m.x, m.z) < 24.0
+		if m.hp >= m.max_hp and m.d.ai != "brute" and m.mark <= 0 and m.stun_t <= 0 and not near:
 			continue
 		var wp := Vector3(m.x, H(m.x, m.z) + m.d.r * 2 + 1.3, m.z)
 		if camera.is_position_behind(wp):
 			continue
 		var p := camera.unproject_position(wp)
-		var w := 70.0 if m.type == "ogro" else 38.0
+		var w := 70.0 if m.d.ai == "brute" else 38.0
+		var tcol: Color = Data.TIERS[m.tier].color
+		overlay.draw_string_outline(font, Vector2(p.x - 80, p.y - 6), "%s · Nv %d" % [m.d.name, m.lvl], HORIZONTAL_ALIGNMENT_CENTER, 160, 11, 3, Color(0, 0, 0, 0.8))
+		overlay.draw_string(font, Vector2(p.x - 80, p.y - 6), "%s · Nv %d" % [m.d.name, m.lvl], HORIZONTAL_ALIGNMENT_CENTER, 160, 11, tcol)
 		overlay.draw_rect(Rect2(p.x - w / 2, p.y, w, 5), Color(0, 0, 0, 0.6))
 		overlay.draw_rect(Rect2(p.x - w / 2, p.y, w * max(0.0, m.hp) / m.max_hp, 5), Color("#f85149"))
 		var tag := ""
@@ -3125,7 +3585,7 @@ func draw_overlay() -> void:
 		if m.void_mark > 0:
 			tag += "◆"
 		if tag != "":
-			overlay.draw_string(font, Vector2(p.x - 50, p.y - 4), tag, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color("#f2cc60"))
+			overlay.draw_string(font, Vector2(p.x - 50, p.y - 20), tag, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color("#f2cc60"))
 	for t in texts:
 		if camera.is_position_behind(t.pos):
 			continue
@@ -3135,7 +3595,7 @@ func draw_overlay() -> void:
 		c.a = a
 		overlay.draw_string_outline(font, Vector2(p.x - 100, p.y), t.s, HORIZONTAL_ALIGNMENT_CENTER, 200, t.size, 4, Color(0, 0, 0, a))
 		overlay.draw_string(font, Vector2(p.x - 100, p.y), t.s, HORIZONTAL_ALIGNMENT_CENTER, 200, t.size, c)
-	if Vector2(P.x, P.z).distance_to(SAFE) < SAFE_R:
+	if in_city(P.x, P.z):
 		var vw := get_viewport().get_visible_rect().size.x
 		overlay.draw_string(font, Vector2(vw / 2 - 100, 120), "ZONA SEGURA", HORIZONTAL_ALIGNMENT_CENTER, 200, 13, Color("#58a6ff"))
 
@@ -3149,11 +3609,24 @@ func draw_minimap(font: Font) -> void:
 	overlay.draw_texture_rect(minimap_tex, Rect2(o, Vector2(sz, sz)), false)
 	var to_map := func(x: float, z: float) -> Vector2:
 		return o + Vector2((x + Terrain.HALF) / Terrain.SIZE, (z + Terrain.HALF) / Terrain.SIZE) * sz
+	for cp in camps:
+		overlay.draw_circle(to_map.call(cp.pos.x, cp.pos.y), 2.5, Data.TIERS[cp.tier].color)
 	for m in mobs:
-		if m.dead <= 0 and m.type == "ogro":
-			overlay.draw_circle(to_map.call(m.x, m.z), 3.0, Color("#f85149"))
-	var c: Vector2 = to_map.call(0.0, 0.0)
-	overlay.draw_string(font, c + Vector2(-30, -8), "Lumen", HORIZONTAL_ALIGNMENT_CENTER, 60, 11, Color.WHITE)
+		if m.dead <= 0 and m.d.ai == "brute":
+			overlay.draw_circle(to_map.call(m.x, m.z), 3.5, Color("#f85149"))
+	for k in CITIES:
+		var cc: Dictionary = CITIES[k]
+		var c: Vector2 = to_map.call(cc.pos.x, cc.pos.y)
+		overlay.draw_string(font, c + Vector2(-40, -8), cc.name, HORIZONTAL_ALIGNMENT_CENTER, 80, 11, Color.WHITE)
+	var zn := zone_at(P.x, P.z)
+	var ztxt: String = zn.name
+	var zc := Color.WHITE
+	if zn.tier >= 0:
+		var T: Dictionary = Data.TIERS[zn.tier]
+		ztxt = "%s · Nv %d–%d" % [zn.name, T.lvl[0], T.lvl[1]]
+		zc = T.color
+	overlay.draw_string_outline(font, Vector2(o.x, o.y + sz + 18), ztxt, HORIZONTAL_ALIGNMENT_CENTER, sz, 12, 3, Color(0, 0, 0, 0.8))
+	overlay.draw_string(font, Vector2(o.x, o.y + sz + 18), ztxt, HORIZONTAL_ALIGNMENT_CENTER, sz, 12, zc)
 	var pp: Vector2 = to_map.call(P.x, P.z)
 	overlay.draw_circle(pp, 4.0, Color("#f2cc60"))
 	overlay.draw_line(pp, pp + Vector2(P.fx, P.fz) * 9.0, Color("#f2cc60"), 2.0)
