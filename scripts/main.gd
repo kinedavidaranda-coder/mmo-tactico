@@ -4,15 +4,16 @@
 extends Node3D
 
 const Data = preload("res://scripts/data.gd")
+const Terrain = preload("res://scripts/terrain.gd")
 
 const ACT = ["s1", "s2", "s3", "ult"]
 const MAXR = {"s1": 8, "s2": 6, "s3": 4, "ult": 3}
 const SLOTNAME = {"s1": "Habilidad 1", "s2": "Habilidad 2", "s3": "Habilidad 3", "ult": "Definitiva", "passive": "Pasiva"}
 const KEYNAME = {"s1": "1", "s2": "2", "s3": "3", "ult": "4"}
 const XP_MAX = 1000.0
-const B = 78.0                      # límite del mundo
+const B = 470.0                     # límite del mundo (el terreno mide 1 × 1 km)
 const SAFE = Vector2(0, 0)
-const SAFE_R = 13.0
+const SAFE_R = 52.0                 # la capital Lumen es zona segura
 const CELL = 2.0                    # tamaño de casillero de la grilla del mundo vivo
 const SAVE_PATH = "user://progreso.json"
 
@@ -148,6 +149,8 @@ class Puddle:
 
 # ---------------------------------------------------------------- estado
 var weapon := {}                    # kit de la clase + básico del arma
+var terrain = null                  # alturas y colores del mundo
+var minimap_tex: ImageTexture
 var P: Player = null
 var pnode: Node3D = null
 var pmats: Array = []
@@ -238,6 +241,7 @@ func _ready() -> void:
 	rng.seed = 7
 	load_progress()
 	build_environment()
+	terrain = Terrain.new()
 	build_world()
 	build_living_world()
 	build_ui()
@@ -318,6 +322,10 @@ func rank_mult(slot: String) -> float:
 func skill_cd(slot: String) -> float:
 	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1))
 
+# altura del suelo (o del agua) en un punto
+func H(x: float, z: float) -> float:
+	return terrain.ground(x, z) if terrain else 0.0
+
 # ================================================================= GEOMETRÍA
 func mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -332,6 +340,7 @@ func ind_mat(c: Color, a: float) -> StandardMaterial3D:
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.albedo_color = Color(c.r, c.g, c.b, a)
 	m.render_priority = 1
+	m.no_depth_test = true            # los indicadores se ven siempre, aunque el piso tenga relieve
 	return m
 
 func sector_mesh(deg: float) -> ArrayMesh:
@@ -420,24 +429,38 @@ func build_environment() -> void:
 	add_child(world)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color("#9cc7e8")
+	e.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color("#4f8fd6")
+	sm.sky_horizon_color = Color("#bfdcf2")
+	sm.ground_horizon_color = Color("#bfdcf2")
+	sm.ground_bottom_color = Color("#6a8a5a")
+	sky.sky_material = sm
+	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.75, 0.8, 0.75)
-	e.ambient_light_energy = 0.6
+	e.ambient_light_color = Color(0.62, 0.68, 0.78)
+	e.ambient_light_energy = 0.45
+	e.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	e.fog_enabled = true
-	e.fog_light_color = Color("#9cc7e8")
-	e.fog_density = 0.006
+	e.fog_light_color = Color("#c9e0f2")
+	e.fog_density = 0.0022
+	e.fog_sky_affect = 0.3
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.tonemap_exposure = 0.9
+	e.tonemap_white = 1.6
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55, 35, 0)
-	sun.light_energy = 1.0
+	sun.light_energy = 0.85
+	sun.light_color = Color(1.0, 0.95, 0.86)
 	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 140.0
 	add_child(sun)
 	camera = Camera3D.new()
 	camera.fov = 50
-	camera.far = 400
+	camera.far = 900
 	add_child(camera)
 	line_mesh = BoxMesh.new()
 	line_mesh.size = Vector3(1, 0.02, 1)
@@ -447,53 +470,195 @@ func build_environment() -> void:
 	ring_mesh.rings = 48
 
 func build_world() -> void:
-	var ground := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(200, 200)
-	ground.mesh = pm
-	ground.material_override = mat(Color("#5f8f45"))
-	world.add_child(ground)
-	for r in [[0, 0, 8, 160], [0, 0, 160, 8]]:
-		var p := MeshInstance3D.new()
-		var pp := PlaneMesh.new()
-		pp.size = Vector2(r[2], r[3])
-		p.mesh = pp
-		p.material_override = mat(Color("#a58a5c"))
-		p.position = Vector3(r[0], 0.02, r[1])
-		world.add_child(p)
-	# zona segura (pueblo)
-	var ring := MeshInstance3D.new()
-	ring.mesh = ring_mesh
-	ring.material_override = ind_mat(Color("#58a6ff"), 0.6)
-	ring.scale = Vector3(SAFE_R, 0.05, SAFE_R)
-	ring.position.y = 0.05
-	world.add_child(ring)
-	for h in [[-9, -9], [9, -9], [-9, 9], [9, 9]]:
-		box(Vector3(5, 3.5, 5), Color("#d9c7a3"), Vector3(h[0], 1.75, h[1]), world)
-		var roof := cyl(0.01, 4.2, 2.5, Color("#8e3b2f"), Vector3(h[0], 4.7, h[1]), world, 4)
-		roof.rotation.y = PI / 4
-	# árboles y rocas (decorado)
-	for i in 140:
-		var x := rng.randf_range(-95, 95)
-		var z := rng.randf_range(-95, 95)
-		if Vector2(x, z).length() < 18 or abs(x) < 6 or abs(z) < 6:
-			continue
-		if rng.randf() < 0.75:
-			var t := Node3D.new()
-			t.position = Vector3(x, 0, z)
-			world.add_child(t)
-			cyl(0.25, 0.35, 1.6, Color("#6b4a2b"), Vector3(0, 0.8, 0), t, 6)
-			var hh := 3.2 + rng.randf() * 1.5
-			cyl(0.01, 1.5 + rng.randf(), hh, Color("#2f6b35") if rng.randf() < 0.5 else Color("#3c7d3a"), Vector3(0, 1.6 + hh / 2, 0), t, 7)
-		else:
-			sphere(0.6 + rng.randf() * 1.1, Color("#8a8f96"), Vector3(x, 0.4, z), world)
-	for w in [[0, -B - 1, 160, 2], [0, B + 1, 160, 2], [-B - 1, 0, 2, 160], [B + 1, 0, 2, 160]]:
-		box(Vector3(w[2], 2, w[3]), Color("#6e6a63"), Vector3(w[0], 1, w[1]), world)
+	# terreno con relieve: colores por zona, altura y pendiente + detalle del shader
+	var tmat := ShaderMaterial.new()
+	tmat.shader = load("res://shaders/terreno.gdshader")
+	tmat.set_shader_parameter("detail", make_noise_tex(3, 0.05))
+	terrain.build_mesh(world, tmat)
+	# agua (río y lago)
+	var water := MeshInstance3D.new()
+	var wp := PlaneMesh.new()
+	wp.size = Vector2(Terrain.SIZE, Terrain.SIZE)
+	water.mesh = wp
+	var wm := ShaderMaterial.new()
+	wm.shader = load("res://shaders/agua.gdshader")
+	wm.set_shader_parameter("ripples", make_noise_tex(9, 0.03))
+	water.material_override = wm
+	water.position.y = Terrain.WATER
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	world.add_child(water)
+	build_capital()
+	build_vegetation()
+	# minimapa
+	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
 	# línea de apuntado hacia el cursor
 	aim_line = line_holder(0.12, 1, Color.WHITE, 0.25, world)
-	aim_line.position.y = 0.06
 	aim_line.visible = false
 	build_aim_indicator()
+
+func make_noise_tex(seed_: int, freq: float) -> NoiseTexture2D:
+	var n := FastNoiseLite.new()
+	n.seed = seed_
+	n.frequency = freq
+	n.fractal_octaves = 4
+	var t := NoiseTexture2D.new()
+	t.noise = n
+	t.width = 256
+	t.height = 256
+	t.seamless = true
+	t.generate_mipmaps = true
+	return t
+
+# Lumen, capital del Imperio: murallas blancas, techos azules y una ciudadela en el centro
+func build_capital() -> void:
+	var stone := Color("#e3dccb")
+	var roof := Color("#3d5f9e")
+	var gold := Color("#d9b04c")
+	var y0 := H(0, 0)
+	var exits := []
+	for r in Terrain.ROADS:
+		exits.append(atan2(r[1].x, r[1].y))
+	var segs := 64
+	for k in segs:
+		var a := TAU * k / segs
+		var gap := false
+		for e in exits:
+			if abs(angle_difference(a, e)) < 0.16:
+				gap = true
+		if gap:
+			continue
+		var px := sin(a) * SAFE_R
+		var pz := cos(a) * SAFE_R
+		var w := box(Vector3(5.4, 5.0, 1.6), stone, Vector3(px, y0 + 2.5, pz), world)
+		w.rotation.y = a + PI / 2
+		if k % 8 == 0:
+			cyl(1.8, 2.0, 8.0, stone, Vector3(px, y0 + 4.0, pz), world, 10)
+			cyl(0.01, 2.4, 3.0, roof, Vector3(px, y0 + 9.5, pz), world, 10)
+	# ciudadela central
+	box(Vector3(14, 10, 14), stone, Vector3(0, y0 + 5, -6), world)
+	box(Vector3(9, 6, 9), stone, Vector3(0, y0 + 13, -6), world)
+	cyl(0.01, 7.5, 6.0, roof, Vector3(0, y0 + 19, -6), world, 4).rotation.y = PI / 4
+	for c in [Vector2(-7, -13), Vector2(7, -13), Vector2(-7, 1), Vector2(7, 1)]:
+		cyl(1.6, 1.8, 14.0, stone, Vector3(c.x, y0 + 7, c.y), world, 10)
+		cyl(0.01, 2.2, 3.5, roof, Vector3(c.x, y0 + 15.7, c.y), world, 10)
+	cyl(0.25, 0.25, 4.0, gold, Vector3(0, y0 + 24, -6), world, 6)
+	sphere(0.9, gold, Vector3(0, y0 + 26.5, -6), world)
+	# casas
+	var r := RandomNumberGenerator.new()
+	r.seed = 99
+	var placed := 0
+	var tries := 0
+	while placed < 26 and tries < 400:
+		tries += 1
+		var a := r.randf() * TAU
+		var d := r.randf_range(20.0, SAFE_R - 7.0)
+		var x := sin(a) * d
+		var z := cos(a) * d
+		if terrain.road_dist(Vector2(x, z)) < 6.0:
+			continue
+		var w := r.randf_range(4.0, 6.5)
+		var hgt := r.randf_range(3.0, 5.0)
+		var hb := box(Vector3(w, hgt, w * 0.8), stone.darkened(r.randf() * 0.12), Vector3(x, y0 + hgt / 2, z), world)
+		hb.rotation.y = a
+		var rf := cyl(0.01, w * 0.78, 2.2, roof.lightened(r.randf() * 0.15), Vector3(x, y0 + hgt + 1.1, z), world, 4)
+		rf.rotation.y = a + PI / 4
+		placed += 1
+	# zona segura (borde azul en el piso)
+	var ring := MeshInstance3D.new()
+	ring.mesh = ring_mesh
+	ring.material_override = ind_mat(Color("#58a6ff"), 0.35)
+	ring.material_override.no_depth_test = false
+	ring.scale = Vector3(SAFE_R + 2.5, 0.05, SAFE_R + 2.5)
+	ring.position.y = y0 + 0.08
+	world.add_child(ring)
+
+# árboles y rocas con MultiMesh: miles de copias en pocas llamadas de dibujo
+func tree_mesh(pine: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var trunk := CylinderMesh.new()
+	trunk.top_radius = 0.22
+	trunk.bottom_radius = 0.32
+	trunk.height = 1.6
+	trunk.radial_segments = 6
+	st.set_color(Color("#6b4a2b"))
+	append_mesh(st, trunk, Transform3D(Basis(), Vector3(0, 0.8, 0)), Color("#6b4a2b"))
+	if pine:
+		for k in 3:
+			var c := CylinderMesh.new()
+			c.top_radius = 0.01
+			c.bottom_radius = 1.7 - k * 0.4
+			c.height = 2.2
+			c.radial_segments = 7
+			append_mesh(st, c, Transform3D(Basis(), Vector3(0, 2.2 + k * 1.2, 0)), Color("#2f6b3f").lightened(k * 0.06))
+	else:
+		var sp := SphereMesh.new()
+		sp.radius = 1.6
+		sp.height = 2.8
+		sp.radial_segments = 8
+		sp.rings = 5
+		append_mesh(st, sp, Transform3D(Basis(), Vector3(0, 2.9, 0)), Color("#4f8f3a"))
+		append_mesh(st, sp, Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(0.7, 3.7, 0.3)), Color("#5fa043"))
+	st.generate_normals()
+	return st.commit()
+
+func append_mesh(st: SurfaceTool, m: PrimitiveMesh, xf: Transform3D, c: Color) -> void:
+	var arr := m.get_mesh_arrays()
+	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+	for i in idx:
+		st.set_color(c)
+		st.add_vertex(xf * verts[i])
+
+func build_vegetation() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 4242
+	var pines := []
+	var rounds := []
+	var rocks := []
+	var step := 6.0
+	var x := -Terrain.HALF + 10.0
+	while x < Terrain.HALF - 10.0:
+		var z := -Terrain.HALF + 10.0
+		while z < Terrain.HALF - 10.0:
+			var px := x + r.randf_range(-2.5, 2.5)
+			var pz := z + r.randf_range(-2.5, 2.5)
+			var dens: float = terrain.tree_density(px, pz)
+			if r.randf() < dens:
+				var t := Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.8, 1.5)), Vector3(px, terrain.height(px, pz) - 0.1, pz))
+				if pz < -150.0 or (px > 150.0 and r.randf() < 0.55):
+					pines.append(t)
+				else:
+					rounds.append(t)
+			elif r.randf() < 0.012 and terrain.height(px, pz) > 1.0 and terrain.road_dist(Vector2(px, pz)) > 6.0 and Vector2(px, pz).length() > SAFE_R + 10:
+				var sc := r.randf_range(0.5, 1.8) * (2.0 if px < -250.0 else 1.0)
+				rocks.append(Transform3D(Basis(Vector3(r.randf(), 1, r.randf()).normalized(), r.randf() * TAU).scaled(Vector3(sc, sc * 0.7, sc)), Vector3(px, terrain.height(px, pz), pz)))
+			z += step
+		x += step
+	var veg_mat := StandardMaterial3D.new()
+	veg_mat.vertex_color_use_as_albedo = true
+	veg_mat.roughness = 0.9
+	for spec in [[tree_mesh(true), pines], [tree_mesh(false), rounds]]:
+		add_multimesh(spec[0], spec[1], veg_mat)
+	var rock := SphereMesh.new()
+	rock.radius = 1.0
+	rock.height = 1.6
+	rock.radial_segments = 6
+	rock.rings = 3
+	var rmat := mat(Color("#8d8a84"))
+	add_multimesh(rock, rocks, rmat)
+
+func add_multimesh(mesh: Mesh, xforms: Array, m: Material) -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = xforms.size()
+	for i in xforms.size():
+		mm.set_instance_transform(i, xforms[i])
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	mi.material_override = m
+	world.add_child(mi)
 
 func build_aim_indicator() -> void:
 	aim_root = Node3D.new()
@@ -535,7 +700,7 @@ func update_aim_indicator() -> void:
 	var aim := resolve_aim(s, true)
 	var d: Vector2 = aim[0]
 	var dd: float = aim[1]
-	aim_root.position = Vector3(P.x, 0.08, P.z)
+	aim_root.position = Vector3(P.x, H(P.x, P.z) + 0.08, P.z)
 	aim_root.rotation.y = atan2(d.x, d.y)
 	var rr: float = s.get("range", s.get("radius", 3.0))
 	aim_ring.scale = Vector3(rr, 0.05, rr)
@@ -553,7 +718,7 @@ func update_aim_indicator() -> void:
 			aim_rect.visible = true
 		"blast", "leap", "blink":
 			var r: float = s.get("radius", 1.2)
-			aim_target.position = Vector3(P.x + d.x * dd, 0.09, P.z + d.y * dd)
+			aim_target.position = Vector3(P.x + d.x * dd, H(P.x + d.x * dd, P.z + d.y * dd) + 0.09, P.z + d.y * dd)
 			aim_target.scale = Vector3(r, 1, r)
 			aim_target.visible = true
 		"buff":
@@ -572,9 +737,10 @@ func spawn_mobs() -> void:
 	mobs.clear()
 	var r := RandomNumberGenerator.new()
 	r.seed = 5
-	var camps = [["lobo", 26, 12, 4], ["lobo", -27, 20, 4], ["lobo", 12, -30, 4], ["lobo", -32, -24, 3], ["lobo", 45, -28, 4],
-		["arquero", 24, 36, 3], ["arquero", -44, 4, 3], ["arquero", -6, 46, 3], ["arquero", 40, -48, 2],
-		["ogro", 52, 40, 1], ["ogro", -50, -50, 1]]
+	# campamentos alrededor de la capital: más fuertes cuanto más lejos
+	var camps = [["lobo", 95, -60, 4], ["lobo", 170, -130, 4], ["lobo", -70, -110, 4], ["lobo", 70, 120, 4], ["lobo", -110, 90, 3],
+		["arquero", -170, 60, 3], ["arquero", -240, -20, 3], ["arquero", 190, 30, 3], ["arquero", 40, 230, 2],
+		["ogro", -60, -230, 1], ["ogro", 270, -170, 1], ["ogro", -300, 120, 1]]
 	for c in camps:
 		for i in c[3]:
 			mobs.append(make_mob(c[0], c[1] + r.randf_range(-4, 4), c[2] + r.randf_range(-4, 4)))
@@ -609,7 +775,7 @@ func make_mob(type: String, x: float, z: float) -> Mob:
 	for p in parts:
 		m.mats.append(p.material_override)
 		m.base_colors.append(p.material_override.albedo_color)
-	m.node.position = Vector3(x, 0, z)
+	m.node.position = Vector3(x, H(x, z), z)
 	return m
 
 func spawn_player() -> void:
@@ -753,16 +919,16 @@ func build_living_world() -> void:
 	fire_mat = StandardMaterial3D.new()
 	fire_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fire_mat.albedo_color = Color("#ff7a1a")
-	add_grass(20, 14, 7, 6)
-	add_grass(-21, 23, 6, 6)
-	add_grass(40, 30, 8, 5)
-	add_grass(-18, -4, 4, 5)
-	add_grass(-40, -8, 5, 6)
-	add_puddle(13, -25, 4)
-	add_puddle(21, 31, 3.5)
-	add_puddle(-29, -20, 4)
-	add_puddle(18, -2, 3)
-	add_puddle(-46, 8, 3.5)
+	add_grass(80, -48, 8, 6)
+	add_grass(-60, -96, 7, 6)
+	add_grass(62, 105, 8, 6)
+	add_grass(-100, 78, 6, 6)
+	add_grass(-70, 30, 5, 5)
+	add_puddle(105, -72, 4)
+	add_puddle(-82, -122, 4)
+	add_puddle(80, 132, 4)
+	add_puddle(-160, 72, 3.5)
+	add_puddle(60, 40, 3)
 
 func ck(i: int, j: int) -> String:
 	return "%d,%d" % [i, j]
@@ -782,7 +948,7 @@ func add_grass(cx: float, cz: float, w: int, h: int) -> void:
 			c.node = MeshInstance3D.new()
 			c.node.mesh = grass_mesh
 			c.node.material_override = grass_mat
-			c.node.position = Vector3(c.x, 0.35, c.z)
+			c.node.position = Vector3(c.x, H(c.x, c.z) + 0.35, c.z)
 			world.add_child(c.node)
 			cells[ck(i, j)] = c
 
@@ -796,7 +962,8 @@ func add_puddle(x: float, z: float, r: float) -> void:
 	pd.mat = ind_mat(Color("#3d7cc9"), 0.85)
 	pd.node.material_override = pd.mat
 	pd.node.scale = Vector3(r, 1, r)
-	pd.node.position = Vector3(x, 0.035, z)
+	pd.node.position = Vector3(x, H(x, z) + 0.06, z)
+	pd.mat.no_depth_test = false
 	world.add_child(pd.node)
 	puddles.append(pd)
 
@@ -808,13 +975,13 @@ func set_cell(c: Cell, st: String) -> void:
 	if st == "grass":
 		c.node.material_override = grass_mat
 		c.node.scale.y = 1.0
-		c.node.position.y = 0.35
+		c.node.position.y = H(c.x, c.z) + 0.35
 	elif st == "fire":
 		c.node.material_override = fire_mat
 	else:
 		c.node.material_override = burnt_mat
 		c.node.scale.y = 0.15
-		c.node.position.y = 0.05
+		c.node.position.y = H(c.x, c.z) + 0.05
 
 func ignite(c) -> void:
 	if c and c.st == "grass":
@@ -1348,18 +1515,42 @@ func start_aim(slot: String) -> void:
 		return
 	aim_slot = slot
 
+# no se puede entrar al agua profunda ni subir paredes de roca
+func can_walk(x0: float, z0: float, x1: float, z1: float) -> bool:
+	var h1: float = terrain.height(x1, z1)
+	if h1 < Terrain.WATER - 1.2:
+		return false
+	var rise: float = h1 - terrain.height(x0, z0)
+	var run: float = max(0.001, Vector2(x1 - x0, z1 - z0).length())
+	return rise / run < 1.3
+
 func cast_from_button(slot: String) -> void:
 	cast_skill(slot, false)
 
 func mouse_world() -> Vector2:
+	# rayo desde la cámara hasta tocar el relieve
 	var mp := get_viewport().get_mouse_position()
 	var from := camera.project_ray_origin(mp)
 	var dir := camera.project_ray_normal(mp)
-	if abs(dir.y) < 0.0001:
-		return Vector2(P.x, P.z)
-	var t := -from.y / dir.y
-	var hit := from + dir * t
-	return Vector2(hit.x, hit.z)
+	var t := 0.0
+	var prev := 0.0
+	while t < 600.0:
+		var q := from + dir * t
+		if q.y <= H(q.x, q.z):
+			var lo := prev
+			var hi := t
+			for k in 8:
+				var mid := (lo + hi) * 0.5
+				var qm := from + dir * mid
+				if qm.y <= H(qm.x, qm.z):
+					hi = mid
+				else:
+					lo = mid
+			var hit := from + dir * hi
+			return Vector2(hit.x, hit.z)
+		prev = t
+		t += 1.5 if t < 80.0 else 4.0
+	return Vector2(P.x, P.z) if P else Vector2.ZERO
 
 func cam_forward() -> Vector2:
 	return Vector2(-sin(cam_yaw), -cos(cam_yaw))
@@ -1545,7 +1736,7 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 			zn.t = s.dur
 			zn.slow = s.slow
 			var mi := ground_mesh(disc_mesh(), Color("#9aa0a6"), 0.45)
-			mi.position = Vector3(P.x, 0.07, P.z)
+			mi.position = Vector3(P.x, H(P.x, P.z) + 0.07, P.z)
 			mi.scale = Vector3(s.radius, 1, s.radius)
 			zn.node = mi
 			zn.mat = mi.material_override
@@ -1610,7 +1801,7 @@ func fire_proj(s: Dictionary, d: Vector2, o: Dictionary) -> void:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = o.get("color", Color.WHITE)
 	mi.material_override = m
-	mi.position = Vector3(p.x, 1.2, p.z)
+	mi.position = Vector3(p.x, H(p.x, p.z) + 1.2, p.z)
 	world.add_child(mi)
 	p.node = mi
 	projs.append(p)
@@ -1769,7 +1960,7 @@ func flash_fx(kind: String, x: float, z: float, sc: float, d: Vector2, c: Color)
 	else:
 		mesh = sector_mesh(float(kind.split(":")[1]))
 	var mi := ground_mesh(mesh, c, 0.5)
-	mi.position = Vector3(x, 0.08, z)
+	mi.position = Vector3(x, H(x, z) + 0.08, z)
 	mi.scale = Vector3(sc, 0.05 if kind == "ring" else 1.0, sc)
 	orient(mi, d.x, d.y)
 	var f := make_fx(mi, 0.3)
@@ -1779,7 +1970,7 @@ func flash_fx(kind: String, x: float, z: float, sc: float, d: Vector2, c: Color)
 func telegraph(x: float, z: float, r: float, dur: float, c: Color) -> Node3D:
 	var g := Node3D.new()
 	world.add_child(g)
-	g.position = Vector3(x, 0.07, z)
+	g.position = Vector3(x, H(x, z) + 0.07, z)
 	for spec in [[disc_mesh(), 0.18, r], [disc_mesh(), 0.38, 0.01], [ring_mesh, 0.8, r]]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = spec[0]
@@ -1796,7 +1987,7 @@ func telegraph(x: float, z: float, r: float, dur: float, c: Color) -> Node3D:
 func telegraph_line(ox: float, oz: float, d: Vector2, L: float, w: float, dur: float, c: Color) -> Node3D:
 	var g := Node3D.new()
 	world.add_child(g)
-	g.position = Vector3(ox, 0.07, oz)
+	g.position = Vector3(ox, H(ox, oz) + 0.07, oz)
 	orient(g, d.x, d.y)
 	line_holder(w, L, c, 0.2, g)
 	var inner := line_holder(w, 0.01, c, 0.45, g)
@@ -1826,7 +2017,7 @@ func clear_tele(m: Mob) -> void:
 
 func swing_fx() -> void:
 	var mi := ground_mesh(sector_mesh(100), Color.WHITE, 0.35)
-	mi.position = Vector3(P.x, 0.09, P.z)
+	mi.position = Vector3(P.x, H(P.x, P.z) + 0.09, P.z)
 	var r: float = weapon.basic.range
 	mi.scale = Vector3(r, 1, r)
 	orient(mi, P.fx, P.fz)
@@ -1846,7 +2037,7 @@ func beam_fx(x1: float, z1: float, x2: float, z2: float, c: Color) -> void:
 
 func add_text(pos: Vector3, s: String, c: Color, size := 14) -> void:
 	var t := FloatText.new()
-	t.pos = pos
+	t.pos = pos + Vector3(0, H(pos.x, pos.z), 0)
 	t.s = s
 	t.color = c
 	t.size = size
@@ -1959,8 +2150,15 @@ func update_game(dt: float) -> void:
 				var r := Vector2(-f.y, f.x)
 				var w := (r * ix + f * (-iy)).normalized()
 				var sp: float = P.speed * (1.4 if P.speed_t > 0 else 1.0) * (1.1 if P.camo else 1.0)
-				P.x = clamp(P.x + w.x * sp * dt, -B, B)
-				P.z = clamp(P.z + w.y * sp * dt, -B, B)
+				var nx: float = clamp(P.x + w.x * sp * dt, -B, B)
+				var nz: float = clamp(P.z + w.y * sp * dt, -B, B)
+				if can_walk(P.x, P.z, nx, nz):
+					P.x = nx
+					P.z = nz
+				elif can_walk(P.x, P.z, nx, P.z):
+					P.x = nx
+				elif can_walk(P.x, P.z, P.x, nz):
+					P.z = nz
 				if not basic_held:
 					P.fx = w.x
 					P.fz = w.y
@@ -2060,7 +2258,7 @@ func update_mobs(dt: float) -> void:
 						var a := atan2(n.x, n.y)
 						var g := Node3D.new()
 						world.add_child(g)
-						g.position = Vector3(m.x, 0.07, m.z)
+						g.position = Vector3(m.x, H(m.x, m.z) + 0.07, m.z)
 						orient(g, n.x, n.y)
 						var outer := MeshInstance3D.new()
 						outer.mesh = sector_mesh(70)
@@ -2163,7 +2361,7 @@ func enemy_shot(m: Mob, d: Vector2) -> void:
 	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mt.albedo_color = Color("#ff5544")
 	mi.material_override = mt
-	mi.position = Vector3(p.x, 1.2, p.z)
+	mi.position = Vector3(p.x, H(p.x, p.z) + 1.2, p.z)
 	world.add_child(mi)
 	p.node = mi
 	projs.append(p)
@@ -2176,7 +2374,7 @@ func update_projs(dt: float) -> void:
 		p.x += sx
 		p.z += sz
 		p.trav += Vector2(sx, sz).length()
-		p.node.position = Vector3(p.x, 1.2, p.z)
+		p.node.position = Vector3(p.x, H(p.x, p.z) + 1.2, p.z)
 		var dead := p.trav >= p.rng
 		if p.enemy:
 			if P.dead <= 0 and d2(p.x, p.z, P.x, P.z) < 0.9:
@@ -2286,7 +2484,7 @@ func render_frame() -> void:
 		camera.position = Vector3(30, 30, 30)
 		camera.look_at(Vector3.ZERO)
 		return
-	pnode.position = Vector3(P.x, P.y, P.z)
+	pnode.position = Vector3(P.x, H(P.x, P.z) + P.y, P.z)
 	pnode.rotation.y = atan2(P.fx, P.fz)
 	pnode.visible = P.dead <= 0 or hero_model != null
 	if running:
@@ -2299,7 +2497,7 @@ func render_frame() -> void:
 	for m in mobs:
 		if m.dead > 0:
 			continue
-		m.node.position = Vector3(m.x, 0, m.z)
+		m.node.position = Vector3(m.x, H(m.x, m.z), m.z)
 		m.node.rotation.y = atan2(m.fx, m.fz)
 		for i in m.mats.size():
 			var base: Color = m.base_colors[i]
@@ -2310,16 +2508,17 @@ func render_frame() -> void:
 			else:
 				m.mats[i].albedo_color = base
 	var cx := cam_x + sin(cam_yaw) * cos(cam_pitch) * cam_dist
-	var cy := sin(cam_pitch) * cam_dist + 1.0
+	var gy := H(cam_x, cam_z)
+	var cy: float = max(gy + sin(cam_pitch) * cam_dist + 1.0, H(cam_x + sin(cam_yaw) * cos(cam_pitch) * cam_dist, cam_z + cos(cam_yaw) * cos(cam_pitch) * cam_dist) + 2.0)
 	var cz := cam_z + cos(cam_yaw) * cos(cam_pitch) * cam_dist
 	camera.position = Vector3(cx, cy, cz)
-	camera.look_at(Vector3(cam_x, 1.2, cam_z))
+	camera.look_at(Vector3(cam_x, gy + 1.2, cam_z))
 	# línea de apuntado hacia el cursor
 	if running and P.dead <= 0:
 		var mw := mouse_world()
 		var v := Vector2(mw.x - P.x, mw.y - P.z)
 		aim_line.visible = v.length() > 0.5
-		aim_line.position = Vector3(P.x, 0.06, P.z)
+		aim_line.position = Vector3(P.x, H(P.x, P.z) + 0.06, P.z)
 		aim_line.scale = Vector3(0.12, 1, min(v.length(), 25.0))
 		orient(aim_line, v.x, v.y)
 	else:
@@ -2330,12 +2529,13 @@ func draw_overlay() -> void:
 	if P == null or pick_panel.visible:
 		return
 	var font := ThemeDB.fallback_font
+	draw_minimap(font)
 	for m in mobs:
 		if m.dead > 0:
 			continue
 		if m.hp >= m.max_hp and m.type != "ogro" and m.mark <= 0 and m.stun_t <= 0:
 			continue
-		var wp := Vector3(m.x, m.d.r * 2 + 1.3, m.z)
+		var wp := Vector3(m.x, H(m.x, m.z) + m.d.r * 2 + 1.3, m.z)
 		if camera.is_position_behind(wp):
 			continue
 		var p := camera.unproject_position(wp)
@@ -2363,6 +2563,25 @@ func draw_overlay() -> void:
 	if Vector2(P.x, P.z).distance_to(SAFE) < SAFE_R:
 		var vw := get_viewport().get_visible_rect().size.x
 		overlay.draw_string(font, Vector2(vw / 2 - 100, 120), "ZONA SEGURA", HORIZONTAL_ALIGNMENT_CENTER, 200, 13, Color("#58a6ff"))
+
+func draw_minimap(font: Font) -> void:
+	if minimap_tex == null:
+		return
+	var vw := get_viewport().get_visible_rect().size.x
+	var sz := 190.0
+	var o := Vector2(vw - sz - 12, 52)
+	overlay.draw_rect(Rect2(o - Vector2(3, 3), Vector2(sz + 6, sz + 6)), Color(0.05, 0.07, 0.09, 0.85))
+	overlay.draw_texture_rect(minimap_tex, Rect2(o, Vector2(sz, sz)), false)
+	var to_map := func(x: float, z: float) -> Vector2:
+		return o + Vector2((x + Terrain.HALF) / Terrain.SIZE, (z + Terrain.HALF) / Terrain.SIZE) * sz
+	for m in mobs:
+		if m.dead <= 0 and m.type == "ogro":
+			overlay.draw_circle(to_map.call(m.x, m.z), 3.0, Color("#f85149"))
+	var c: Vector2 = to_map.call(0.0, 0.0)
+	overlay.draw_string(font, c + Vector2(-30, -8), "Lumen", HORIZONTAL_ALIGNMENT_CENTER, 60, 11, Color.WHITE)
+	var pp: Vector2 = to_map.call(P.x, P.z)
+	overlay.draw_circle(pp, 4.0, Color("#f2cc60"))
+	overlay.draw_line(pp, pp + Vector2(P.fx, P.fz) * 9.0, Color("#f2cc60"), 2.0)
 
 # acceso para pruebas automáticas
 func debug_state() -> Dictionary:

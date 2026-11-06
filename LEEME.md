@@ -24,3 +24,10 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - Si existe `assets/heroes/<clase>.glb` (por ejemplo `tanque.glb`), el juego usa ese modelo con sus animaciones en vez de la figura provisoria.
 - Animaciones que busca: `idle`, `run` (correr; si falta usa `strafe`), `attack` (básico), `skill` (habilidades) y `death`.
 - La espada y el escudo se agregan aparte, agarrados a los huesos de las manos (`mixamorig_RightHand` / `mixamorig_LeftHand`).
+
+## El mapa: corazón del Imperio de la Luz (1 × 1 km)
+- `scripts/terrain.gd` arma el relieve: cordillera nevada al norte, río que baja al lago del este, bosque al este, cañadón seco al oeste, campos de cultivo al sur y la capital **Lumen** en el centro (zona segura).
+- Los caminos salen de Lumen hacia los cuatro puntos cardinales.
+- `shaders/terreno.gdshader` le da textura al suelo y `shaders/agua.gdshader` mueve el agua.
+- Arriba a la derecha hay un minimapa (punto amarillo = vos, rojos = ogros).
+- La primera vez que abre, el mundo tarda unos segundos en generarse.
