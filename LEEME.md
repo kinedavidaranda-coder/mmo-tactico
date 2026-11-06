@@ -1,0 +1,26 @@
+# MMORPG Táctico — Demo de combate (Godot 4)
+
+## Cómo abrirlo
+1. Descomprimí esta carpeta donde quieras (por ejemplo `Documentos\mmo_godot`).
+2. Abrí Godot (el .exe que **no** dice "console").
+3. En el Administrador de proyectos tocá **Importar**, buscá la carpeta y elegí el archivo `project.godot`.
+4. Tocá **Importar y editar**. La primera vez tarda unos segundos.
+5. Para jugar, apretá **F5** o el botón ▶ de arriba a la derecha.
+
+## Controles (PC)
+- **WASD**: moverte · **clic izquierdo** o **Espacio**: ataque básico
+- **Mantené 1 2 3 4** (o Q E R F): aparece el indicador; apuntá con el mouse y **soltá** para lanzar. Clic derecho cancela
+- **Clic derecho + arrastrar** o **flechas**: girar la cámara · **rueda**: zoom
+- **P**: puntos de habilidad · **O**: aceite del básico (fuego / rayo)
+
+## Qué hay adentro
+- `scripts/data.gd`: clases, tipos de arma, habilidades y enemigos. Para cambiar números (daño, enfriamiento, vida) se toca este archivo.
+- `scripts/main.gd`: todo el juego (mundo, cámara, combate, mundo vivo e interfaz).
+- El progreso (maestría y puntos) se guarda solo en la carpeta de usuario de Godot.
+
+Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integrados).
+
+## Héroes con modelo 3D
+- Si existe `assets/heroes/<clase>.glb` (por ejemplo `tanque.glb`), el juego usa ese modelo con sus animaciones en vez de la figura provisoria.
+- Animaciones que busca: `idle`, `run` (correr; si falta usa `strafe`), `attack` (básico), `skill` (habilidades) y `death`.
+- La espada y el escudo se agregan aparte, agarrados a los huesos de las manos (`mixamorig_RightHand` / `mixamorig_LeftHand`).
