@@ -3,6 +3,7 @@
 Proyecto de David Aranda: un MMORPG de acción táctica con skillshots, con héroes al estilo MLBB, la simpleza de Metin2 y un mundo abierto lindo como el de Breath of the Wild. Esta carpeta es la **demo jugable en Godot**. El diseño completo vive en la **Biblia** (un doc en claude.ai: https://claude.ai/artifact/9RDbX5DwEHUDEcz3mrVZs6). Desde Claude Code no se puede editar: si una decisión de diseño cambia, avisale a David para que la anote ahí.
 
 ## Cómo trabajar con David
+- **Mirá `TAREAS.md` al empezar.** Es el buzón con lo que se decidió en la charla de diseño y hay que programar. Marcá lo que termines.
 - Hablale en **español rioplatense/paraguayo**, directo y sin vueltas. Él no programa: explicale qué cambió en el juego, no el código.
 - **Antes de pisar archivos que él pudo haber tocado** (escenas, assets, cosas que edita en Godot), revisá `git status` y `git diff`. Si hay cambios suyos sin commitear, preguntale antes.
 - **Borrá los archivos de prueba** que crees (scripts de test, capturas, guardados de prueba) antes de terminar.
