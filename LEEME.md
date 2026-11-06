@@ -31,3 +31,8 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - `shaders/terreno.gdshader` le da textura al suelo y `shaders/agua.gdshader` mueve el agua.
 - Arriba a la derecha hay un minimapa (punto amarillo = vos, rojos = ogros).
 - La primera vez que abre, el mundo tarda unos segundos en generarse.
+
+## Pasto alto, muros y dash
+- **Pasto alto:** si estás adentro, los enemigos no te ven (los que te perseguían te pierden de vista). Atacar te revela un segundo. Se puede quemar.
+- **Muros y construcciones:** murallas de Lumen, torres de vigía, ruinas, granjas con cercos y muros cerca de los campamentos. Bloquean el paso a pie (a vos y a los enemigos).
+- **Dash, saltos y teletransportes atraviesan los muros**, como en MLBB: sirven para escapar o emboscar. Si el dash terminaría adentro de un muro, te deja del otro lado.

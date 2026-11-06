@@ -47,6 +47,8 @@ class Player:
 	var burn_t := 0.0
 	var burn_acc := 0.0
 	var queued = null
+	var hidden := false
+	var reveal_t := 0.0
 
 class Mob:
 	var type := ""
@@ -136,7 +138,9 @@ class Cell:
 	var st := "grass"
 	var t := 0.0
 	var spread := 0.0
-	var node: MeshInstance3D
+	var idx := 0
+	var base_y := 0.0
+	var tint := Color.WHITE
 
 class Puddle:
 	var x := 0.0
@@ -162,6 +166,10 @@ var fxs: Array = []
 var zones: Array = []
 var texts: Array = []
 var cells := {}
+var cell_list: Array = []
+var grass_mm: MultiMesh
+var colliders: Array = []          # muros y edificios: cajas en el plano (centro, medio tamaño, giro)
+var col_grid := {}                  # grilla de 16 m para buscar colisiones rápido
 var puddles: Array = []
 
 var mastery := {}                   # maestría por estilo (facción:clase:rareza)
@@ -488,6 +496,7 @@ func build_world() -> void:
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	world.add_child(water)
 	build_capital()
+	build_structures()
 	build_vegetation()
 	# minimapa
 	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
@@ -529,17 +538,18 @@ func build_capital() -> void:
 			continue
 		var px := sin(a) * SAFE_R
 		var pz := cos(a) * SAFE_R
-		var w := box(Vector3(5.4, 5.0, 1.6), stone, Vector3(px, y0 + 2.5, pz), world)
-		w.rotation.y = a + PI / 2
+		solid_box(Vector3(5.4, 5.0, 1.6), stone, Vector3(px, y0 + 2.5, pz), a + PI / 2)
 		if k % 8 == 0:
 			cyl(1.8, 2.0, 8.0, stone, Vector3(px, y0 + 4.0, pz), world, 10)
+			add_collider(Vector2(px, pz), Vector2(1.9, 1.9), 0.0)
 			cyl(0.01, 2.4, 3.0, roof, Vector3(px, y0 + 9.5, pz), world, 10)
 	# ciudadela central
-	box(Vector3(14, 10, 14), stone, Vector3(0, y0 + 5, -6), world)
+	solid_box(Vector3(14, 10, 14), stone, Vector3(0, y0 + 5, -6), 0.0)
 	box(Vector3(9, 6, 9), stone, Vector3(0, y0 + 13, -6), world)
 	cyl(0.01, 7.5, 6.0, roof, Vector3(0, y0 + 19, -6), world, 4).rotation.y = PI / 4
 	for c in [Vector2(-7, -13), Vector2(7, -13), Vector2(-7, 1), Vector2(7, 1)]:
 		cyl(1.6, 1.8, 14.0, stone, Vector3(c.x, y0 + 7, c.y), world, 10)
+		add_collider(c, Vector2(1.8, 1.8), 0.0)
 		cyl(0.01, 2.2, 3.5, roof, Vector3(c.x, y0 + 15.7, c.y), world, 10)
 	cyl(0.25, 0.25, 4.0, gold, Vector3(0, y0 + 24, -6), world, 6)
 	sphere(0.9, gold, Vector3(0, y0 + 26.5, -6), world)
@@ -558,8 +568,9 @@ func build_capital() -> void:
 			continue
 		var w := r.randf_range(4.0, 6.5)
 		var hgt := r.randf_range(3.0, 5.0)
-		var hb := box(Vector3(w, hgt, w * 0.8), stone.darkened(r.randf() * 0.12), Vector3(x, y0 + hgt / 2, z), world)
-		hb.rotation.y = a
+		if blocked(x, z, w * 0.8):
+			continue
+		solid_box(Vector3(w, hgt, w * 0.8), stone.darkened(r.randf() * 0.12), Vector3(x, y0 + hgt / 2, z), a)
 		var rf := cyl(0.01, w * 0.78, 2.2, roof.lightened(r.randf() * 0.15), Vector3(x, y0 + hgt + 1.1, z), world, 4)
 		rf.rotation.y = a + PI / 4
 		placed += 1
@@ -571,6 +582,159 @@ func build_capital() -> void:
 	ring.scale = Vector3(SAFE_R + 2.5, 0.05, SAFE_R + 2.5)
 	ring.position.y = y0 + 0.08
 	world.add_child(ring)
+
+# ----------------------------------------------------------------- colisiones (muros y edificios)
+func add_collider(c: Vector2, half: Vector2, rot: float) -> void:
+	var col := {"c": c, "h": half, "r": rot}
+	colliders.append(col)
+	var reach: float = half.length()
+	for gx in range(int(floor((c.x - reach) / 16.0)), int(floor((c.x + reach) / 16.0)) + 1):
+		for gz in range(int(floor((c.y - reach) / 16.0)), int(floor((c.y + reach) / 16.0)) + 1):
+			var k := Vector2i(gx, gz)
+			if not col_grid.has(k):
+				col_grid[k] = []
+			col_grid[k].append(col)
+
+func solid_box(size: Vector3, c: Color, pos: Vector3, rot: float) -> MeshInstance3D:
+	var mi := box(size, c, pos, world)
+	mi.rotation.y = rot
+	add_collider(Vector2(pos.x, pos.z), Vector2(size.x / 2.0, size.z / 2.0), rot)
+	return mi
+
+# ¿el punto (con un radio) choca con algún muro o edificio?
+func blocked(x: float, z: float, pad := 0.6) -> bool:
+	var k := Vector2i(int(floor(x / 16.0)), int(floor(z / 16.0)))
+	if not col_grid.has(k):
+		return false
+	for col in col_grid[k]:
+		var dx: float = x - col.c.x
+		var dz: float = z - col.c.y
+		var cr := cos(col.r)
+		var sr := sin(col.r)
+		var lx := dx * cr - dz * sr
+		var lz := dx * sr + dz * cr
+		if abs(lx) < col.h.x + pad and abs(lz) < col.h.y + pad:
+			return true
+	return false
+
+# un dash atraviesa muros, pero no puede terminar adentro de uno: se estira hasta salir
+func dash_end(sx: float, sz: float, ex: float, ez: float) -> Vector2:
+	var d := Vector2(ex - sx, ez - sz)
+	var dir := d.normalized() if d.length() > 0.01 else Vector2(P.fx, P.fz)
+	var p := Vector2(ex, ez)
+	var tries := 0
+	while blocked(p.x, p.y) and tries < 20:
+		p += dir * 0.5
+		tries += 1
+	if blocked(p.x, p.y):
+		p = Vector2(ex, ez)
+		while blocked(p.x, p.y) and p.distance_to(Vector2(sx, sz)) > 0.3:
+			p -= dir * 0.5
+	return Vector2(clamp(p.x, -B, B), clamp(p.y, -B, B))
+
+# ----------------------------------------------------------------- construcciones dispersas
+func ok_site(x: float, z: float, r: float) -> bool:
+	var p := Vector2(x, z)
+	if p.length() < SAFE_R + 20.0 or terrain.road_dist(p) < r + 4.0 or terrain.river_dist(p) < r + 10.0:
+		return false
+	if p.distance_to(Terrain.LAKE) < Terrain.LAKE_R + r + 15.0:
+		return false
+	if terrain.height(x, z) < 1.5 or terrain.height(x, z) > 30.0 or blocked(x, z, r):
+		return false
+	return true
+
+func wall_run(a: Vector2, b: Vector2, thick: float, hgt: float, col: Color, broken: float, r: RandomNumberGenerator) -> void:
+	var L := a.distance_to(b)
+	var n: int = max(1, int(L / 4.0))
+	var dir := (b - a) / L
+	var rot := atan2(dir.x, dir.y) + PI / 2
+	for i in n:
+		if r.randf() < broken:
+			continue
+		var c := a + dir * (L * (i + 0.5) / n)
+		var hh: float = hgt * (r.randf_range(0.55, 1.0) if broken > 0 else 1.0)
+		solid_box(Vector3(L / n + 0.05, hh, thick), col, Vector3(c.x, H(c.x, c.y) + hh / 2.0 - 0.2, c.y), rot)
+
+func build_structures() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 777
+	var stone := Color("#cfc7b5")
+	var old := Color("#a59c8a")
+	var wood := Color("#7a5634")
+	var roof := Color("#3d5f9e")
+	var straw := Color("#c9a94f")
+	# torres de vigía en los caminos
+	for spot in [Vector2(-25, -150), Vector2(150, -45), Vector2(-160, 35), Vector2(28, 190), Vector2(-60, -320), Vector2(330, -75)]:
+		var x: float = spot.x + 9.0
+		var z: float = spot.y + 6.0
+		var y := H(x, z)
+		cyl(2.2, 2.6, 11.0, stone, Vector3(x, y + 5.5, z), world, 8)
+		cyl(0.01, 3.2, 3.5, roof, Vector3(x, y + 12.7, z), world, 8)
+		add_collider(Vector2(x, z), Vector2(2.5, 2.5), 0.0)
+	# ruinas: muros rotos al pie de la cordillera y en el cañadón
+	var ruins := 0
+	var tries := 0
+	while ruins < 16 and tries < 300:
+		tries += 1
+		var x := r.randf_range(-430, 430)
+		var z := r.randf_range(-330, 60)
+		if x > -180 and z > -120:
+			continue
+		if not ok_site(x, z, 10):
+			continue
+		var a := r.randf() * TAU
+		var d := Vector2(cos(a), sin(a))
+		var c := Vector2(x, z)
+		wall_run(c - d * 9, c + d * 9, 1.4, 3.2, old, 0.25, r)
+		wall_run(c + d * 9, c + d * 9 + Vector2(-d.y, d.x) * 8, 1.4, 3.2, old, 0.3, r)
+		ruins += 1
+	# granjas con cercos en los campos del sur, y un molino
+	var farms := 0
+	tries = 0
+	while farms < 9 and tries < 300:
+		tries += 1
+		var x := r.randf_range(-340, 340)
+		var z := r.randf_range(170, 420)
+		if not ok_site(x, z, 9):
+			continue
+		var a := r.randf_range(-0.4, 0.4)
+		var y := H(x, z)
+		solid_box(Vector3(7, 4, 5.5), Color("#e8dcc0"), Vector3(x, y + 2, z), a)
+		cyl(0.01, 5.2, 2.6, straw, Vector3(x, y + 5.3, z), world, 4).rotation.y = a + PI / 4
+		var f := Vector2(x, z)
+		var fx := Vector2(cos(a), -sin(a))
+		var fz := Vector2(sin(a), cos(a))
+		var corners = [f + fx * -9 + fz * 7, f + fx * 9 + fz * 7, f + fx * 9 + fz * 14, f + fx * -9 + fz * 14]
+		for k in 3:
+			wall_run(corners[k], corners[k + 1], 0.3, 1.1, wood, 0.0, r)
+		if farms == 2:
+			var mx := x + 14.0
+			cyl(1.8, 2.4, 10.0, Color("#e8dcc0"), Vector3(mx, H(mx, z) + 5, z), world, 8)
+			add_collider(Vector2(mx, z), Vector2(2.3, 2.3), 0.0)
+			var hub := Node3D.new()
+			hub.position = Vector3(mx, H(mx, z) + 9, z + 2.6)
+			hub.name = "Aspas"
+			world.add_child(hub)
+			for k in 4:
+				var blade := box(Vector3(0.5, 7, 0.15), wood, Vector3(0, 3.5, 0), hub)
+				var arm := Node3D.new()
+				hub.add_child(arm)
+				blade.reparent(arm)
+				arm.rotation.z = k * PI / 2
+		farms += 1
+	# laberintos de muros cerca de los campamentos: pasillos para escaparse y emboscar
+	for camp in [Vector2(140, -75), Vector2(170, -130), Vector2(-70, -110), Vector2(70, 120), Vector2(-110, 90), Vector2(-170, 60), Vector2(190, 30)]:
+		for k in 3:
+			var a := r.randf() * TAU
+			var d := r.randf_range(12, 20)
+			var c: Vector2 = camp + Vector2(cos(a), sin(a)) * d
+			if not ok_site(c.x, c.y, 4) and c.length() > SAFE_R + 20:
+				if terrain.road_dist(c) < 5.0 or terrain.height(c.x, c.y) < 1.5:
+					continue
+			var dir := Vector2(cos(a + PI / 2), sin(a + PI / 2))
+			wall_run(c - dir * 6, c + dir * 6, 1.2, 2.6, old, 0.0, r)
+			if k == 0:
+				wall_run(c + dir * 6, c + dir * 6 + Vector2(-dir.y, dir.x) * 6, 1.2, 2.6, old, 0.0, r)
 
 # árboles y rocas con MultiMesh: miles de copias en pocas llamadas de dibujo
 func tree_mesh(pine: bool) -> ArrayMesh:
@@ -623,7 +787,7 @@ func build_vegetation() -> void:
 		while z < Terrain.HALF - 10.0:
 			var px := x + r.randf_range(-2.5, 2.5)
 			var pz := z + r.randf_range(-2.5, 2.5)
-			var dens: float = terrain.tree_density(px, pz)
+			var dens: float = 0.0 if blocked(px, pz, 2.5) else terrain.tree_density(px, pz)
 			if r.randf() < dens:
 				var t := Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.8, 1.5)), Vector3(px, terrain.height(px, pz) - 0.1, pz))
 				if pz < -150.0 or (px > 150.0 and r.randf() < 0.55):
@@ -738,7 +902,7 @@ func spawn_mobs() -> void:
 	var r := RandomNumberGenerator.new()
 	r.seed = 5
 	# campamentos alrededor de la capital: más fuertes cuanto más lejos
-	var camps = [["lobo", 95, -60, 4], ["lobo", 170, -130, 4], ["lobo", -70, -110, 4], ["lobo", 70, 120, 4], ["lobo", -110, 90, 3],
+	var camps = [["lobo", 140, -75, 4], ["lobo", 170, -130, 4], ["lobo", -70, -110, 4], ["lobo", 70, 120, 4], ["lobo", -110, 90, 3],
 		["arquero", -170, 60, 3], ["arquero", -240, -20, 3], ["arquero", 190, 30, 3], ["arquero", 40, 230, 2],
 		["ogro", -60, -230, 1], ["ogro", 270, -170, 1], ["ogro", -300, 120, 1]]
 	for c in camps:
@@ -912,19 +1076,20 @@ func update_hero_anim(dt: float) -> void:
 # ================================================================= MUNDO VIVO
 # Reglas simples sobre una grilla: el pasto se quema y propaga el fuego; el agua conduce el rayo.
 func build_living_world() -> void:
-	grass_mesh = BoxMesh.new()
-	grass_mesh.size = Vector3(CELL * 0.96, 0.7, CELL * 0.96)
-	grass_mat = mat(Color("#7fcf4a"))
-	burnt_mat = mat(Color("#3a2e24"))
-	fire_mat = StandardMaterial3D.new()
-	fire_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fire_mat.albedo_color = Color("#ff7a1a")
-	add_grass(80, -48, 8, 6)
-	add_grass(-60, -96, 7, 6)
-	add_grass(62, 105, 8, 6)
-	add_grass(-100, 78, 6, 6)
-	add_grass(-70, 30, 5, 5)
-	add_puddle(105, -72, 4)
+	# pasto alto: esconde al que está adentro y se puede quemar
+	var r := RandomNumberGenerator.new()
+	r.seed = 31
+	for camp in [Vector2(140, -75), Vector2(170, -130), Vector2(-70, -110), Vector2(70, 120), Vector2(-110, 90),
+			Vector2(-170, 60), Vector2(-240, -20), Vector2(190, 30), Vector2(40, 230), Vector2(-60, -230), Vector2(270, -170), Vector2(-300, 120)]:
+		for k in 2:
+			var a := r.randf() * TAU
+			var d := r.randf_range(10, 22)
+			add_grass(camp.x + cos(a) * d, camp.y + sin(a) * d, r.randi_range(5, 9), r.randi_range(4, 7))
+	# a los costados de los caminos, cerca de la capital
+	for spot in [Vector2(-70, 30), Vector2(70, -30), Vector2(30, 80), Vector2(-30, -85), Vector2(120, 10), Vector2(-120, -10), Vector2(10, 140), Vector2(-90, -60)]:
+		add_grass(spot.x, spot.y, r.randi_range(5, 8), r.randi_range(4, 6))
+	finish_grass()
+	add_puddle(150, -95, 4)
 	add_puddle(-82, -122, 4)
 	add_puddle(80, 132, 4)
 	add_puddle(-160, 72, 3.5)
@@ -945,11 +1110,13 @@ func add_grass(cx: float, cz: float, w: int, h: int) -> void:
 			c.j = j
 			c.x = i * CELL + CELL / 2
 			c.z = j * CELL + CELL / 2
-			c.node = MeshInstance3D.new()
-			c.node.mesh = grass_mesh
-			c.node.material_override = grass_mat
-			c.node.position = Vector3(c.x, H(c.x, c.z) + 0.35, c.z)
-			world.add_child(c.node)
+			var p := Vector2(c.x, c.z)
+			if terrain.height(c.x, c.z) < 0.8 or p.length() < SAFE_R + 3.0 or terrain.road_dist(p) < 2.5 or blocked(c.x, c.z, 0.3):
+				continue
+			c.base_y = terrain.height(c.x, c.z)
+			c.tint = Color("#3f8a2e").lerp(Color("#5aa83c"), randf())
+			c.idx = cell_list.size()
+			cell_list.append(c)
 			cells[ck(i, j)] = c
 
 func add_puddle(x: float, z: float, r: float) -> void:
@@ -967,21 +1134,64 @@ func add_puddle(x: float, z: float, r: float) -> void:
 	world.add_child(pd.node)
 	puddles.append(pd)
 
+# mata de pasto: varias hojas finas, más oscuras abajo y claras arriba (el color lo pone cada instancia)
+func tuft_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 5
+	for k in 14:
+		var bx := rr.randf_range(-0.95, 0.95)
+		var bz := rr.randf_range(-0.95, 0.95)
+		var hgt := rr.randf_range(1.0, 1.6)
+		var lean := Vector3(rr.randf_range(-0.3, 0.3), 0, rr.randf_range(-0.3, 0.3))
+		var a := rr.randf() * TAU
+		var side := Vector3(cos(a), 0, sin(a)) * 0.22
+		var base := Vector3(bx, 0, bz)
+		var tip := base + Vector3(0, hgt, 0) + lean
+		for tri in [[base - side, base + side, tip]]:
+			st.set_color(Color(0.55, 0.55, 0.55))
+			st.add_vertex(tri[0])
+			st.set_color(Color(0.55, 0.55, 0.55))
+			st.add_vertex(tri[1])
+			st.set_color(Color(1.15, 1.15, 1.15))
+			st.add_vertex(tri[2])
+	st.generate_normals()
+	return st.commit()
+
+func finish_grass() -> void:
+	grass_mm = MultiMesh.new()
+	grass_mm.transform_format = MultiMesh.TRANSFORM_3D
+	grass_mm.use_colors = true
+	grass_mm.mesh = tuft_mesh()
+	grass_mm.instance_count = cell_list.size()
+	for c in cell_list:
+		set_cell(c, "grass")
+	var gm := StandardMaterial3D.new()
+	gm.vertex_color_use_as_albedo = true
+	gm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	gm.roughness = 0.9
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = grass_mm
+	mi.material_override = gm
+	world.add_child(mi)
+
 func cell_at(x: float, z: float) -> Cell:
 	return cells.get(ck(int(floor(x / CELL)), int(floor(z / CELL))))
 
 func set_cell(c: Cell, st: String) -> void:
 	c.st = st
-	if st == "grass":
-		c.node.material_override = grass_mat
-		c.node.scale.y = 1.0
-		c.node.position.y = H(c.x, c.z) + 0.35
-	elif st == "fire":
-		c.node.material_override = fire_mat
-	else:
-		c.node.material_override = burnt_mat
-		c.node.scale.y = 0.15
-		c.node.position.y = H(c.x, c.z) + 0.05
+	var sy := 1.0
+	var col := c.tint
+	if st == "fire":
+		sy = 1.1
+		col = Color("#ff7a1a")
+	elif st == "burnt":
+		sy = 0.18
+		col = Color("#3a2e24")
+	var b := Basis(Vector3.UP, float(c.idx % 7)).scaled(Vector3(1.05, sy, 1.05))
+	grass_mm.set_instance_transform(c.idx, Transform3D(b, Vector3(c.x, c.base_y - 0.05, c.z)))
+	grass_mm.set_instance_color(c.idx, col)
 
 func ignite(c) -> void:
 	if c and c.st == "grass":
@@ -1039,14 +1249,13 @@ func env_hit(m: Mob, dmg: float, stun: float, color: Color) -> void:
 		kill(m)
 
 func update_living(dt: float) -> void:
-	fire_mat.albedo_color = Color.from_hsv(0.05 + randf() * 0.04, 1.0, 1.0)
 	var any_fire := false
 	for c in cells.values():
 		if c.st == "fire":
 			any_fire = true
 			c.t -= dt
 			c.spread -= dt
-			c.node.scale.y = 0.9 + randf() * 0.5
+			grass_mm.set_instance_color(c.idx, Color.from_hsv(0.03 + randf() * 0.06, 1.0, 1.0) * 1.3)
 			if c.spread <= 0:
 				c.spread = 99.0
 				for dd in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
@@ -1240,6 +1449,8 @@ func update_ui() -> void:
 		st = "Robo de vida"
 	elif P.burn_t > 0:
 		st = "¡Te quemás!"
+	elif P.hidden:
+		st = "En el pasto: oculto"
 	chips_lbl.text = "%s ✓   %s   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", st]
 	for slot in ACT:
 		var b: Button = skill_btns[slot]
@@ -1423,7 +1634,7 @@ func show_picker() -> void:
 		b.add_theme_color_override("font_color", c.color)
 		grid.add_child(b)
 	pick_box.add_child(grid)
-	var help := mk_label("PC: WASD para moverte · clic izquierdo o Espacio = básico · mantené 1 2 3 4 (o Q E R F) para ver el indicador, apuntá con el mouse y soltá para lanzar (clic derecho cancela) · clic derecho y arrastrar = girar cámara · rueda = zoom · flechas = girar cámara · P = puntos · O = aceite.\nCombate: todo se puede esquivar. Los lobos avisan antes de morder, los arqueros marcan una línea roja y el ogro un círculo o un cono. Tras una habilidad, tu próximo básico pega +50% (Tejido).\nMundo vivo: el pasto alto se prende fuego, el fuego se propaga y quema a quien esté adentro (a vos también). Los charcos conducen el rayo y aturden a todos los que estén en el agua. Llevá a los lobos al pasto o al agua.", 12, Color(0.85, 0.85, 0.8))
+	var help := mk_label("PC: WASD para moverte · clic izquierdo o Espacio = básico · mantené 1 2 3 4 (o Q E R F) para ver el indicador, apuntá con el mouse y soltá para lanzar (clic derecho cancela) · clic derecho y arrastrar = girar cámara · rueda = zoom · flechas = girar cámara · P = puntos · O = aceite.\nCombate: todo se puede esquivar. Los lobos avisan antes de morder, los arqueros marcan una línea roja y el ogro un círculo o un cono. Tras una habilidad, tu próximo básico pega +50% (Tejido).\nPasto alto: si estás adentro los enemigos no te ven (atacar te revela un momento). Muros: bloquean el paso, pero los dash, saltos y teletransportes los atraviesan.\nMundo vivo: el pasto alto se prende fuego, el fuego se propaga y quema a quien esté adentro (a vos también). Los charcos conducen el rayo y aturden a todos los que estén en el agua. Llevá a los lobos al pasto o al agua.", 12, Color(0.85, 0.85, 0.8))
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	pick_box.add_child(help)
 
@@ -1517,6 +1728,8 @@ func start_aim(slot: String) -> void:
 
 # no se puede entrar al agua profunda ni subir paredes de roca
 func can_walk(x0: float, z0: float, x1: float, z1: float) -> bool:
+	if blocked(x1, z1) and not blocked(x0, z0):
+		return false
 	var h1: float = terrain.height(x1, z1)
 	if h1 < Terrain.WATER - 1.2:
 		return false
@@ -1593,7 +1806,8 @@ func try_basic() -> void:
 		if tt and d2(P.x, P.z, tt.x, tt.z) - tt.d.r > b.range:
 			var n := Vector2(tt.x - P.x, tt.z - P.z).normalized()
 			var dd: float = d2(P.x, P.z, tt.x, tt.z) - tt.d.r - 1.2
-			start_dash(P.x + n.x * dd, P.z + n.y * dd, 0.14, {})
+			var ce := dash_end(P.x, P.z, P.x + n.x * dd, P.z + n.y * dd)
+			start_dash(ce.x, ce.y, 0.14, {})
 			P.chase = 0
 			P.queued = tt
 			return
@@ -1674,12 +1888,12 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 					if abs(angle_difference(atan2(pd.x - P.x, pd.z - P.z), a0)) <= half + atan2(pd.r, max(1.0, L)):
 						element_at(pd.x, pd.z, s.el, 0)
 		"dash":
-			var ex: float = clamp(P.x + d.x * s.range, -B, B)
-			var ez: float = clamp(P.z + d.y * s.range, -B, B)
-			start_dash(ex, ez, s.range / 40.0, s if s.dmg > 0 else {})
+			var e := dash_end(P.x, P.z, P.x + d.x * s.range, P.z + d.y * s.range)
+			start_dash(e.x, e.y, s.range / 40.0, s if s.dmg > 0 else {})
 		"leap":
-			var tx: float = clamp(P.x + d.x * dd, -B, B)
-			var tz: float = clamp(P.z + d.y * dd, -B, B)
+			var le := dash_end(P.x, P.z, P.x + d.x * dd, P.z + d.y * dd)
+			var tx: float = le.x
+			var tz: float = le.y
 			P.leap = {"sx": P.x, "sz": P.z, "ex": tx, "ez": tz, "t": 0.0, "dur": 0.38, "s": s}
 			var tel := telegraph(tx, tz, s.radius, 0.38, col)
 			fxs.append(make_fx(tel, 0.38))
@@ -1713,8 +1927,9 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 		"proj":
 			fire_proj(s, d, {"skill": true, "s": s, "color": col})
 		"blink":
-			var x: float = clamp(P.x + d.x * dd, -B, B)
-			var z: float = clamp(P.z + d.y * dd, -B, B)
+			var be := dash_end(P.x, P.z, P.x + d.x * dd, P.z + d.y * dd)
+			var x: float = be.x
+			var z: float = be.y
 			flash_fx("ring", P.x, P.z, 1.5, d, col)
 			P.x = x
 			P.z = z
@@ -1724,8 +1939,9 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 				if m.dead <= 0 and d2(P.x, P.z, m.x, m.z) < s.radius + m.d.r:
 					var n := Vector2(P.x - m.x, P.z - m.z).normalized()
 					var dd2: float = max(0.0, d2(P.x, P.z, m.x, m.z) - m.d.r - 1.3)
-					m.x += n.x * dd2
-					m.z += n.y * dd2
+					if not blocked(m.x + n.x * dd2, m.z + n.y * dd2, 0.3):
+						m.x += n.x * dd2
+						m.z += n.y * dd2
 					hit_mob(m, s.dmg, opts)
 			flash_fx("disc", P.x, P.z, s.radius, d, col)
 		"smoke":
@@ -1858,6 +2074,7 @@ func hit_mob(m: Mob, base, o: Dictionary) -> void:
 	m.hp -= dmg
 	m.flash = 0.12
 	m.aggroed = true
+	P.reveal_t = 1.0                 # atacar desde el pasto te revela un momento
 	P.calm = 0
 	if s.has("stun"):
 		if m.slam:
@@ -2076,6 +2293,9 @@ func update_game(dt: float) -> void:
 		if P.shield_t <= 0:
 			P.shield = 0
 	P.calm += dt
+	P.reveal_t = max(0.0, P.reveal_t - dt)
+	var gc = cell_at(P.x, P.z)
+	P.hidden = gc != null and gc.st == "grass" and P.reveal_t <= 0 and P.dead <= 0
 	var pa := passive()
 	if pa.effect == "camo" and P.calm > 3 and not P.camo and P.dead <= 0:
 		P.camo = true
@@ -2228,8 +2448,11 @@ func update_mobs(dt: float) -> void:
 		var home := d2(m.x, m.z, m.sx, m.sz)
 		if P.dead > 0 or in_safe or home > 32:
 			m.aggroed = false
-		elif not m.aggroed and dP < m.d.aggro and not P.camo:
+		elif not m.aggroed and dP < m.d.aggro and not P.camo and (not P.hidden or dP < 2.5):
 			m.aggroed = true
+		elif m.aggroed and P.hidden and dP > 3.0:
+			m.aggroed = false        # te perdió de vista en el pasto
+			add_text(Vector3(m.x, m.d.r * 2 + 2.0, m.z), "?", Color("#c9d1d9"), 18)
 		var spd: float = m.d.speed * (1.0 - max(m.slow_v if m.slow_t > 0 else 0.0, zone_slow))
 		if m.aggroed:
 			var n := Vector2(P.x - m.x, P.z - m.z).normalized()
@@ -2293,11 +2516,9 @@ func update_mobs(dt: float) -> void:
 					m.wind_dir = n
 					m.tele = telegraph_line(m.x, m.z, n, m.d.range, 1.0, m.d.wind, Color("#f85149"))
 				elif dP < 6:
-					m.x -= n.x * spd * dt
-					m.z -= n.y * spd * dt
+					mob_step(m, -n.x * spd * dt, -n.y * spd * dt)
 				elif dP > m.d.range - 1:
-					m.x += n.x * spd * dt
-					m.z += n.y * spd * dt
+					mob_step(m, n.x * spd * dt, n.y * spd * dt)
 				continue
 			var reach: float = m.d.r + 0.7 + m.d.reach * 0.5
 			if m.wind > 0:
@@ -2312,16 +2533,14 @@ func update_mobs(dt: float) -> void:
 				if m.atk_cd <= 0:
 					m.wind = m.d.wind
 			else:
-				m.x += n.x * spd * dt
-				m.z += n.y * spd * dt
+				mob_step(m, n.x * spd * dt, n.y * spd * dt)
 		else:
 			if m.tele:
 				clear_tele(m)
 				m.wind = 0
 			if home > 0.5:
 				var n := Vector2(m.sx - m.x, m.sz - m.z).normalized()
-				m.x += n.x * spd * 1.4 * dt
-				m.z += n.y * spd * 1.4 * dt
+				mob_step(m, n.x * spd * 1.4 * dt, n.y * spd * 1.4 * dt)
 				m.fx = n.x
 				m.fz = n.y
 			m.hp = min(m.max_hp, m.hp + m.max_hp * 0.25 * dt)
@@ -2342,6 +2561,17 @@ func update_mobs(dt: float) -> void:
 				a.z -= dz / dd * p
 				b.x += dx / dd * p
 				b.z += dz / dd * p
+
+# los enemigos también chocan con muros: si no pueden pasar, se deslizan por el costado
+func mob_step(m: Mob, dx: float, dz: float) -> void:
+	var r: float = m.d.r * 0.6
+	if not blocked(m.x + dx, m.z + dz, r):
+		m.x += dx
+		m.z += dz
+	elif not blocked(m.x + dx, m.z, r):
+		m.x += dx
+	elif not blocked(m.x, m.z + dz, r):
+		m.z += dz
 
 func enemy_shot(m: Mob, d: Vector2) -> void:
 	var p := Proj.new()
@@ -2491,9 +2721,13 @@ func render_frame() -> void:
 		update_hero_anim(get_process_delta_time())
 	if hero_model:
 		hero_model.visible = true
+	var ghost: bool = P.camo or P.hidden
 	for m in pmats:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if P.camo else BaseMaterial3D.TRANSPARENCY_DISABLED
-		m.albedo_color.a = 0.35 if P.camo else 1.0
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if ghost else BaseMaterial3D.TRANSPARENCY_DISABLED
+		m.albedo_color.a = (0.35 if P.camo else 0.55) if ghost else 1.0
+	var aspas = world.get_node_or_null("Aspas")
+	if aspas:
+		aspas.rotation.z += get_process_delta_time() * 0.8
 	for m in mobs:
 		if m.dead > 0:
 			continue
