@@ -91,6 +91,10 @@ func base_height(x: float, z: float) -> float:
 	var west: float = smoothstep(-200.0, -380.0, x) * (1.0 - north)
 	var mesa: float = floor((noise.get_noise_2d(x * 1.7, z * 1.7) + 1.0) * 3.0) * 6.0
 	h = lerp(h, 6.0 + mesa, west * 0.85)
+	# desierto del oeste: dunas suaves más allá del cañadón
+	var desert: float = smoothstep(-330.0, -400.0, x) * (1.0 - north)
+	var dune: float = (sin(x * 0.045 + noise.get_noise_2d(x * 0.5, z * 0.5) * 3.0) * 0.5 + 0.5) * 5.0
+	h = lerp(h, 7.0 + dune + n * 2.0, desert * 0.9)
 	# campos del sur: más llanos
 	var south: float = smoothstep(110.0, 220.0, z) * (1.0 - west)
 	h = lerp(h, 3.5 + n * 1.5, south * 0.75)
@@ -186,6 +190,9 @@ func color_at(i: int, j: int) -> Color:
 	# cañadón oeste: pasto seco y tierra rojiza
 	var west: float = smoothstep(-180.0, -330.0, x)
 	c = c.lerp(Color("#c9a66b").lerp(Color("#b5764a"), v), west * 0.9)
+	# desierto: arena
+	var desert: float = smoothstep(-330.0, -400.0, x) * (1.0 - smoothstep(-160.0, -420.0, z))
+	c = c.lerp(Color("#e6d29c").lerp(Color("#d9bf82"), v), desert * 0.95)
 	# campos del sur: parcelas de cultivo
 	if z > 150.0 and abs(x) < 380.0:
 		var cell := Vector2i(int(floor((x + 7.0) / 34.0)), int(floor((z + 3.0) / 26.0)))
@@ -201,8 +208,16 @@ func color_at(i: int, j: int) -> Color:
 		c = c.lerp(Color("#76705f").lerp(Color("#8c8371"), v), smoothstep(28.0, 45.0, h))
 	if h > 62.0:
 		c = c.lerp(Color("#f2f4f7"), smoothstep(62.0, 72.0, h))
+	# cumbres nevadas: nieve también más abajo
+	var snowy: float = smoothstep(-290.0, -360.0, z)
+	if snowy > 0.0 and h > 20.0:
+		c = c.lerp(Color("#eef2f6").lerp(Color("#dde5ee"), v), snowy * smoothstep(20.0, 34.0, h) * (1.0 - smoothstep(0.9, 1.3, s)))
 	# pendiente: roca a la vista
 	c = c.lerp(Color("#6f6656").lerp(Color("#857a66"), v), smoothstep(0.55, 1.1, s))
+	# playa del Lago Espejo
+	var dlake := p.distance_to(LAKE)
+	if dlake < LAKE_R + 26.0:
+		c = c.lerp(Color("#eadcb0").lerp(Color("#e0cf9c"), v), smoothstep(LAKE_R + 26.0, LAKE_R + 12.0, dlake))
 	# orillas: arena
 	if h < 1.4:
 		c = c.lerp(Color("#d8c9a0"), smoothstep(1.4, 0.2, h))
@@ -274,7 +289,31 @@ func tree_density(x: float, z: float) -> float:
 	var foothill: float = smoothstep(-120.0, -200.0, z) * (1.0 - smoothstep(30.0, 45.0, h))
 	var west: float = smoothstep(-200.0, -330.0, x)
 	var clumps: float = clamp(noise2.get_noise_2d(x * 0.6, z * 0.6) * 1.5 + 0.2, 0.0, 1.0)
+	if x < -330.0 or p.distance_to(LAKE) < LAKE_R + 26.0:
+		return 0.0            # desierto y playa: sin árboles comunes (hay cactus y palmeras)
 	return clamp(0.05 + forest * 0.9 + foothill * 0.35 + clumps * 0.12 - west * 0.15, 0.0, 1.0)
+
+# biomas (como las regiones de Hyrule): definen flora, vetas y decoración
+static func biome_at(x: float, z: float) -> String:
+	var p := Vector2(x, z)
+	if p.distance_to(LAKE) < LAKE_R + 26.0:
+		return "playa"
+	if z < -300.0:
+		return "nieve"
+	if z < -170.0:
+		return "montana"
+	if x < -330.0:
+		return "desierto"
+	if x < -200.0:
+		return "canadon"
+	if x > 150.0 and z < 80.0:
+		return "bosque"
+	if z > 150.0:
+		return "campos"
+	return "pradera"
+
+const BIOME_NAMES = {"playa": "Playas del Lago Espejo", "nieve": "Cumbres nevadas", "montana": "Montañas del norte",
+	"desierto": "Desierto de Arena Blanca", "canadon": "Cañadón rojo", "bosque": "Bosque del Este", "campos": "Campos del Sur", "pradera": "Praderas centrales"}
 
 # imagen chica para el minimapa
 func minimap_image(px: int) -> Image:

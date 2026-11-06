@@ -593,6 +593,7 @@ func build_world() -> void:
 	build_structures()
 	build_vegetation()
 	build_ores()
+	build_flora()
 	build_points_of_interest()
 	# minimapa
 	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
@@ -905,16 +906,17 @@ func zone_at(x: float, z: float) -> Dictionary:
 			if Vector2(x, z).distance_to(CITIES[k].pos) < CITIES[k].r:
 				best = CITIES[k].name
 		return {"name": best, "tier": -1}
+	var bn: String = Terrain.BIOME_NAMES[Terrain.biome_at(x, z)]
 	if z < -290.0:
-		return {"name": "Cumbres del Norte", "tier": 3}
+		return {"name": bn, "tier": 3}
 	var dl := Vector2(x, z).distance_to(CITIES.lumen.pos)
 	var ds := Vector2(x, z).distance_to(CITIES.sapientia.pos)
 	var d: float = min(dl, ds)
 	if d < 170.0:
-		return {"name": "Praderas de Lumen" if dl < ds else "Llanos de Sapientia", "tier": 0}
+		return {"name": bn, "tier": 0}
 	if d < 300.0:
-		return {"name": "Caminos sin ley", "tier": 1}
-	return {"name": "Fronteras orcas", "tier": 2}
+		return {"name": bn, "tier": 1}
+	return {"name": bn, "tier": 2}
 
 # cercos: "rustico" (postes y travesaños, como de granja), "empalizada" (troncos en punta)
 # y "orca" (empalizada oscura). Bloquean el paso, pero los dashes los atraviesan.
@@ -1815,22 +1817,247 @@ func try_fast_travel(pos: Vector2) -> bool:
 			return true
 	return true
 
+# ----------------------------------------------------------------- flora recolectable y decoración por bioma
+var flora_parts := {}        # especie -> [[MultiMesh, Transform3D local], ...]
+var flora: Array = []        # {sp, x, z, idx, base: Transform3D, taken, regrow}
+var flora_grid := {}
+
+func part(mesh: Mesh, c: Color, xf: Transform3D, glow := false) -> Array:
+	return [mesh, c, xf, glow]
+
+func pmesh_box(sz: Vector3) -> BoxMesh:
+	var m := BoxMesh.new()
+	m.size = sz
+	return m
+
+func pmesh_sphere(r: float, h := -1.0) -> SphereMesh:
+	var m := SphereMesh.new()
+	m.radius = r
+	m.height = r * 2.0 if h < 0 else h
+	m.radial_segments = 8
+	m.rings = 4
+	return m
+
+func pmesh_cyl(top: float, bot: float, h: float, seg := 6) -> CylinderMesh:
+	var m := CylinderMesh.new()
+	m.top_radius = top
+	m.bottom_radius = bot
+	m.height = h
+	m.radial_segments = seg
+	m.rings = 1
+	return m
+
+func T(pos: Vector3, rot := Vector3.ZERO, sc := Vector3.ONE) -> Transform3D:
+	return Transform3D(Basis.from_euler(rot).scaled(sc), pos)
+
+func flora_shape(sp: String) -> Array:
+	var leaf := Color("#4f8f3a")
+	match sp:
+		"hierba_dulce":
+			return [part(pmesh_box(Vector3(0.08, 0.5, 0.08)), leaf, T(Vector3(0, 0.25, 0), Vector3(0.2, 0, 0.1))),
+				part(pmesh_box(Vector3(0.08, 0.45, 0.08)), leaf, T(Vector3(0.1, 0.22, 0.05), Vector3(-0.2, 0, -0.2))),
+				part(pmesh_sphere(0.09), Color("#f2d64b"), T(Vector3(0.03, 0.52, 0.02)))]
+		"hierba_vida":
+			return [part(pmesh_box(Vector3(0.3, 0.06, 0.12)), leaf, T(Vector3(0, 0.25, 0), Vector3(0, 0, 0.5))),
+				part(pmesh_box(Vector3(0.3, 0.06, 0.12)), leaf, T(Vector3(0, 0.25, 0), Vector3(0, 1.6, -0.5))),
+				part(pmesh_cyl(0.02, 0.02, 0.5), leaf, T(Vector3(0, 0.25, 0))),
+				part(pmesh_sphere(0.1), Color("#e0405a"), T(Vector3(0, 0.52, 0)), true)]
+		"bayas":
+			return [part(pmesh_sphere(0.4, 0.55), Color("#3f7a35"), T(Vector3(0, 0.28, 0))),
+				part(pmesh_sphere(0.07), Color("#7b3fb8"), T(Vector3(0.25, 0.45, 0.2))),
+				part(pmesh_sphere(0.07), Color("#7b3fb8"), T(Vector3(-0.2, 0.4, 0.25))),
+				part(pmesh_sphere(0.07), Color("#7b3fb8"), T(Vector3(0.05, 0.55, -0.28)))]
+		"hongo":
+			return [part(pmesh_cyl(0.06, 0.08, 0.3), Color("#efe6d2"), T(Vector3(0, 0.15, 0))),
+				part(pmesh_sphere(0.2, 0.18), Color("#9a5a32"), T(Vector3(0, 0.33, 0)))]
+		"hongo_luz":
+			return [part(pmesh_cyl(0.05, 0.07, 0.35), Color("#e6f4ff"), T(Vector3(0, 0.17, 0))),
+				part(pmesh_sphere(0.18, 0.16), Color("#5fe0ff"), T(Vector3(0, 0.38, 0)), true)]
+		"zanahoria":
+			return [part(pmesh_cyl(0.09, 0.02, 0.25), Color("#f08a2c"), T(Vector3(0, 0.08, 0))),
+				part(pmesh_box(Vector3(0.05, 0.4, 0.05)), Color("#5fae3e"), T(Vector3(0, 0.38, 0), Vector3(0.3, 0, 0))),
+				part(pmesh_box(Vector3(0.05, 0.4, 0.05)), Color("#5fae3e"), T(Vector3(0, 0.38, 0), Vector3(-0.3, 0, 0.2)))]
+		"calabaza":
+			return [part(pmesh_sphere(0.38, 0.55), Color("#e8822a"), T(Vector3(0, 0.27, 0))),
+				part(pmesh_cyl(0.04, 0.05, 0.18), Color("#5b7a2a"), T(Vector3(0, 0.6, 0))),
+				part(pmesh_box(Vector3(0.5, 0.03, 0.3)), leaf, T(Vector3(0.4, 0.05, 0), Vector3(0, 0.6, 0)))]
+		"trigo":
+			return [part(pmesh_box(Vector3(0.04, 0.9, 0.04)), Color("#d9c16a"), T(Vector3(0, 0.45, 0), Vector3(0.1, 0, 0))),
+				part(pmesh_box(Vector3(0.04, 0.85, 0.04)), Color("#d9c16a"), T(Vector3(0.12, 0.42, 0.05), Vector3(-0.15, 0, -0.1))),
+				part(pmesh_box(Vector3(0.09, 0.22, 0.09)), Color("#e8cf72"), T(Vector3(0.0, 0.95, 0.04)))]
+		"tuna":
+			return [part(pmesh_cyl(0.2, 0.22, 0.8, 8), Color("#4f8a4a"), T(Vector3(0, 0.4, 0))),
+				part(pmesh_sphere(0.1), Color("#e0507a"), T(Vector3(0.12, 0.85, 0)), false),
+				part(pmesh_sphere(0.1), Color("#e0507a"), T(Vector3(-0.1, 0.82, 0.08)), false)]
+		"pimiento":
+			return [part(pmesh_sphere(0.25, 0.35), Color("#4f8f3a"), T(Vector3(0, 0.18, 0))),
+				part(pmesh_cyl(0.07, 0.02, 0.22), Color("#e23b2e"), T(Vector3(0.15, 0.35, 0), Vector3(0, 0, 0.6))),
+				part(pmesh_cyl(0.07, 0.02, 0.22), Color("#e23b2e"), T(Vector3(-0.12, 0.33, 0.1), Vector3(0.3, 0, -0.5)))]
+		"menta":
+			return [part(pmesh_sphere(0.25, 0.3), Color("#a8e0b8"), T(Vector3(0, 0.15, 0))),
+				part(pmesh_sphere(0.18, 0.25), Color("#c4f0d0"), T(Vector3(0.1, 0.3, 0.05)))]
+		"flor_escarcha":
+			return [part(pmesh_cyl(0.02, 0.02, 0.4), Color("#7fa8c0"), T(Vector3(0, 0.2, 0))),
+				part(pmesh_box(Vector3(0.35, 0.03, 0.12)), Color("#dff4ff"), T(Vector3(0, 0.42, 0), Vector3(0, 0, 0)), true),
+				part(pmesh_box(Vector3(0.35, 0.03, 0.12)), Color("#dff4ff"), T(Vector3(0, 0.42, 0), Vector3(0, 1.57, 0)), true),
+				part(pmesh_sphere(0.06), Color("#7ec8ff"), T(Vector3(0, 0.45, 0)), true)]
+		"coco":
+			return [part(pmesh_sphere(0.2), Color("#6b4a2e"), T(Vector3(0, 0.18, 0))),
+				part(pmesh_sphere(0.2), Color("#5e4026"), T(Vector3(0.3, 0.18, 0.1)))]
+		"alga":
+			return [part(pmesh_box(Vector3(0.12, 0.6, 0.04)), Color("#2f6b4a"), T(Vector3(0, 0.3, 0), Vector3(0, 0, 0.25))),
+				part(pmesh_box(Vector3(0.12, 0.5, 0.04)), Color("#3b7a52"), T(Vector3(0.1, 0.25, 0), Vector3(0, 0.8, -0.3))),
+				part(pmesh_box(Vector3(0.12, 0.55, 0.04)), Color("#2f6b4a"), T(Vector3(-0.08, 0.27, 0.06), Vector3(0, 2.0, 0.2)))]
+	return []
+
+func make_parts_mm(shape: Array, count: int) -> Array:
+	var out := []
+	for pt in shape:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = pt[0]
+		mm.instance_count = count
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = mm
+		var m := mat(pt[1])
+		if pt[3]:
+			m.emission_enabled = true
+			m.emission = pt[1]
+			m.emission_energy_multiplier = 0.9
+		mi.material_override = m
+		mi.visibility_range_end = 120.0
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		world.add_child(mi)
+		out.append([mm, pt[2]])
+	return out
+
+func set_flora_xf(f: Dictionary, base: Transform3D) -> void:
+	for pp in flora_parts[f.sp]:
+		pp[0].set_instance_transform(f.idx, base * pp[1])
+
+func flora_spot_ok(sp: String, x: float, z: float) -> bool:
+	var bi: String = Terrain.biome_at(x, z)
+	if not bi in Data.FLORA[sp].biomes:
+		return false
+	var h: float = terrain.height(x, z)
+	if sp == "alga":
+		return h > -0.4 and h < 0.9 and not in_city(x, z, 5.0)
+	if h < 1.0 or in_city(x, z, 5.0) or terrain.road_dist(Vector2(x, z)) < 3.0 or blocked(x, z, 0.6):
+		return false
+	return true
+
+func build_flora() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 6060
+	for sp in Data.FLORA:
+		var want: int = int(Data.FLORA[sp].n * 2.5)
+		var pts := []
+		var tries := 0
+		while pts.size() < want and tries < want * 60:
+			tries += 1
+			var cx := r.randf_range(-490.0, 490.0)
+			var cz := r.randf_range(-490.0, 490.0)
+			if not flora_spot_ok(sp, cx, cz):
+				continue
+			# en matas, como en BotW: varias juntas
+			for k in r.randi_range(3, 6):
+				var q := Vector2(cx, cz) + Vector2(r.randf_range(-3.5, 3.5), r.randf_range(-3.5, 3.5))
+				if flora_spot_ok(sp, q.x, q.y):
+					pts.append(q)
+		flora_parts[sp] = make_parts_mm(flora_shape(sp), pts.size())
+		for i in pts.size():
+			var q: Vector2 = pts[i]
+			var base := Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(1.2, 1.6)), Vector3(q.x, H(q.x, q.y) - 0.03, q.y))
+			var f := {"sp": sp, "x": q.x, "z": q.y, "idx": i, "base": base, "taken": false, "regrow": 0.0}
+			set_flora_xf(f, base)
+			flora.append(f)
+			var k := Vector2i(int(floor(q.x / 8.0)), int(floor(q.y / 8.0)))
+			if not flora_grid.has(k):
+				flora_grid[k] = []
+			flora_grid[k].append(f)
+	build_biome_decor(r)
+
+# decoración que no se recolecta: cactus en el desierto, palmeras en la playa, rocas de nieve
+func build_biome_decor(r: RandomNumberGenerator) -> void:
+	var cactus := [part(pmesh_cyl(0.45, 0.5, 3.2, 8), Color("#4f8a4a"), T(Vector3(0, 1.6, 0))),
+		part(pmesh_cyl(0.3, 0.3, 1.4, 8), Color("#4f8a4a"), T(Vector3(0.75, 2.0, 0))),
+		part(pmesh_cyl(0.3, 0.3, 0.9, 8), Color("#4f8a4a"), T(Vector3(0.45, 1.45, 0), Vector3(0, 0, 1.57))),
+		part(pmesh_cyl(0.28, 0.28, 1.1, 8), Color("#4f8a4a"), T(Vector3(-0.7, 2.4, 0))),
+		part(pmesh_cyl(0.28, 0.28, 0.8, 8), Color("#4f8a4a"), T(Vector3(-0.42, 1.95, 0), Vector3(0, 0, 1.57)))]
+	var palm := [part(pmesh_cyl(0.2, 0.32, 6.5, 6), Color("#8a6a45"), T(Vector3(0.6, 3.2, 0), Vector3(0, 0, -0.18)))]
+	for k in 7:
+		var a := TAU * k / 7.0
+		palm.append(part(pmesh_box(Vector3(3.2, 0.08, 0.7)), Color("#4f9a45"), T(Vector3(1.2 + cos(a) * 1.5, 6.3, sin(a) * 1.5), Vector3(0, -a, -0.35))))
+	var sets = [[cactus, 140, ["desierto", "canadon"]], [palm, 45, ["playa"]]]
+	for st in sets:
+		var pts := []
+		var tries := 0
+		while pts.size() < int(st[1]) and tries < 20000:
+			tries += 1
+			var x := r.randf_range(-490.0, 490.0)
+			var z := r.randf_range(-490.0, 490.0)
+			if not Terrain.biome_at(x, z) in st[2]:
+				continue
+			if terrain.height(x, z) < 1.2 or in_city(x, z, 8.0) or terrain.road_dist(Vector2(x, z)) < 4.0 or blocked(x, z, 1.5):
+				continue
+			pts.append(Vector2(x, z))
+		var parts := make_parts_mm(st[0], pts.size())
+		for i in pts.size():
+			var q: Vector2 = pts[i]
+			var base := Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.8, 1.3)), Vector3(q.x, H(q.x, q.y) - 0.1, q.y))
+			for pp in parts:
+				pp[0].set_instance_transform(i, base * pp[1])
+			add_collider(q, Vector2(0.6, 0.6), 0.0)
+
+func update_flora(dt: float) -> void:
+	var k0 := Vector2i(int(floor(P.x / 8.0)), int(floor(P.z / 8.0)))
+	for gx in range(k0.x - 1, k0.x + 2):
+		for gz in range(k0.y - 1, k0.y + 2):
+			var k := Vector2i(gx, gz)
+			if not flora_grid.has(k):
+				continue
+			for f in flora_grid[k]:
+				if f.taken or d2(P.x, P.z, f.x, f.z) > 1.4:
+					continue
+				f.taken = true
+				f.regrow = 180.0                    # vuelve a crecer a los 3 minutos
+				set_flora_xf(f, Transform3D(Basis().scaled(Vector3.ONE * 0.001), Vector3(f.x, -50, f.z)))
+				var nm: String = Data.FLORA[f.sp].name
+				ingredients[nm] = int(ingredients.get(nm, 0)) + 1
+				add_text(Vector3(f.x, 1.6, f.z), "+1 %s (%s)" % [nm, Data.FLORA[f.sp].use], Color("#7ee787"), 13)
+	for f in flora:
+		if f.taken:
+			f.regrow -= dt
+			if f.regrow <= 0 and d2(P.x, P.z, f.x, f.z) > 4.0:
+				f.taken = false
+				set_flora_xf(f, f.base)
+
 # ----------------------------------------------------------------- vetas de mineral
+# cada bioma tiene sus vetas; el Imperio no tiene todos los minerales (los otros vienen de la frontera o del comercio)
 func ore_region_ok(kind: String, x: float, z: float) -> bool:
+	var bi: String = Terrain.biome_at(x, z)
 	var t: int = zone_at(x, z).tier
 	match kind:
 		"piedra":
-			return t == 0 or t == 1
+			return bi in ["pradera", "campos", "canadon"]
+		"cobre":
+			return bi in ["bosque", "pradera"]
 		"hierro":
-			return t == 1
+			return t == 1 and bi != "playa"
 		"azufre":
-			return x < -270.0 and z > -280.0
+			return bi in ["canadon", "desierto"]
+		"sal":
+			return bi == "playa" or bi == "desierto"
 		"cuarzo":
-			return t >= 0 and t <= 2
+			return bi in ["pradera", "montana", "campos"]
+		"luminita":
+			return bi == "montana"
 		"plata":
 			return t == 2
+		"hielo":
+			return bi == "nieve"
 		"mithril":
-			return t == 3
+			return bi == "nieve" and t == 3
 		"frontera":
 			return abs(x) > 420.0 or abs(z) > 420.0
 	return true
@@ -1838,11 +2065,12 @@ func ore_region_ok(kind: String, x: float, z: float) -> bool:
 func build_ores() -> void:
 	var r := RandomNumberGenerator.new()
 	r.seed = 4242
-	var plan = [["piedra", 60], ["hierro", 30], ["azufre", 22], ["cuarzo", 30], ["plata", 25], ["mithril", 22], ["frontera", 10]]
+	var plan = [["piedra", 45], ["cobre", 28], ["hierro", 25], ["azufre", 24], ["sal", 18], ["cuarzo", 30], ["luminita", 20],
+		["plata", 22], ["hielo", 18], ["mithril", 14], ["frontera", 10]]
 	for pl in plan:
 		var made := 0
 		var tries := 0
-		while made < int(pl[1]) and tries < 4000:
+		while made < int(pl[1]) and tries < 5000:
 			tries += 1
 			var x := r.randf_range(-480.0, 480.0)
 			var z := r.randf_range(-480.0, 480.0)
@@ -3712,6 +3940,7 @@ func update_game(dt: float) -> void:
 	update_trees(dt)
 	update_ores(dt)
 	update_world_life(dt)
+	update_flora(dt)
 	for i in range(zones.size() - 1, -1, -1):
 		var zn: Zone = zones[i]
 		zn.t -= dt

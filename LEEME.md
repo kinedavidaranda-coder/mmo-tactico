@@ -62,14 +62,20 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - **Te perdió en el pasto**: va a buscarte adonde te vio por última vez, mira para todos lados y vuelve.
 - Conejo cornudo huye · jabalí no ataca si no lo provocás, pero embiste en línea · lobos rodean y entran de a uno · oso solo ataca de cerca · goblins huyen heridos y salen corriendo si cae el ogro · gólem duerme como roca hasta que lo pisás · espectro casi invisible, se teletransporta · troll se regenera si dejás de pegarle (el fuego lo frena).
 
-## Vetas de mineral
-Rocas con cristales que se rompen a golpes y vuelven a aparecer a los 5 minutos. Espada larga, espada y escudo y explosiones rompen el doble; la magia, la mitad.
-- **Piedra** (gris, Nv 1–35): pedernal y sal de roca.
-- **Hierro** (óxido, caminos Nv 15–35): hierro.
-- **Azufre** (amarilla, cañadón del oeste): azufre y ámbar.
-- **Cuarzo solar** (dorada, brilla): el mineral propio del Imperio de la Luz (gemas de Defensa).
-- **Plata** (fronteras Nv 35–45) y **mithril** (celeste, cumbres).
-- **Veta extranjera** (roja, en los bordes del mapa): un mineral de otra facción. Por eso la frontera se pelea.
+## Biomas, flora y vetas
+El reino tiene regiones como Hyrule, y cada una tiene su flora y sus vetas (el nombre aparece abajo del minimapa):
+| Bioma | Flora (se junta pasando por encima, vuelve a crecer a los 3 min) | Vetas |
+|---|---|---|
+| Praderas centrales | Hierba dulce, hierba de vida, bayas, trigo | Piedra, cobre, cuarzo solar |
+| Bosque del Este | Hongos, hongo luminoso, bayas, hierba de vida | Cobre |
+| Campos del Sur | Zanahoria, calabaza, trigo, hierba dulce | Piedra, cuarzo solar |
+| Cañadón rojo | Pimiento ardiente, fruta de cactus | Piedra, azufre |
+| Desierto de Arena Blanca | Fruta de cactus, pimiento (y cactus) | Azufre, sal |
+| Playas del Lago Espejo | Coco, alga del lago (y palmeras) | Sal |
+| Montañas del norte | Menta glacial, hongos | Cuarzo solar, luminita |
+| Cumbres nevadas | Flor de escarcha, menta glacial | Cristal de hielo, mithril |
+
+Hierro, plata y las vetas extranjeras dependen de la franja de nivel. Espada larga, espada y escudo y explosiones rompen el doble; la magia, la mitad.
 
 ## Lugares para descubrir
 - **12 santuarios** con un haz de luz naranja que se ve de lejos. Al tocarlos se vuelven celestes y aparecen en el minimapa: hacé clic en uno (o en una ciudad) para viajar.
