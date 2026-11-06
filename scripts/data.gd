@@ -64,26 +64,30 @@ const CLASSES = [
 
 # Bestiario por franjas de nivel (ecología tipo "Mazmorras y tragones": cada bicho vive en su hábitat
 # y muchos se comen). ai: melee / ranged / brute (jefe con golpes telegrafiados).
+# temper (comportamiento, al estilo BotW): timid huye · neutral solo pelea si lo atacás (y embiste) ·
+# pack caza en manada rodeándote · territorial avisa y ataca de cerca · camp duerme junto al fuego,
+# tiene vigía y alerta al campamento · coward huye herido · dormant duerme como roca ·
+# ghost es casi invisible y se teletransporta · regen se regenera si no lo golpeás
 # body: quad (animal), biped (humanoide), brute (grandote). food: ingrediente que puede soltar.
 const MOBDEF = {
 	# --- Nv 1–15 · animales ---
-	"conejo":  {"name": "Conejo cornudo", "ai": "melee", "body": "quad", "size": 0.55, "hp": 70.0, "r": 0.5, "speed": 5.6, "aggro": 9.0, "dmg": 8.0, "xp": 7, "color": Color("#c9b08a"), "accent": Color("#f2ead8"), "reach": 1.4, "wind": 0.35, "cd": 1.1, "food": "Carne tierna"},
-	"lobo":    {"name": "Lobo", "ai": "melee", "body": "quad", "size": 1.0, "hp": 130.0, "r": 0.8, "speed": 5.2, "aggro": 13.0, "dmg": 13.0, "xp": 12, "color": Color("#7a7f88"), "accent": Color("#5e636b"), "reach": 2.0, "wind": 0.45, "cd": 1.3, "food": ""},
-	"jabali":  {"name": "Jabalí", "ai": "melee", "body": "quad", "size": 1.15, "hp": 190.0, "r": 0.9, "speed": 4.8, "aggro": 11.0, "dmg": 16.0, "xp": 15, "color": Color("#5b4636"), "accent": Color("#e8e0cc"), "reach": 2.0, "wind": 0.5, "cd": 1.5, "food": "Panceta de jabalí"},
-	"oso":     {"name": "Oso pardo", "ai": "brute", "body": "quad", "size": 2.1, "hp": 900.0, "r": 1.5, "speed": 3.8, "aggro": 13.0, "dmg": 20.0, "xp": 80, "color": Color("#6b4a2e"), "accent": Color("#4a321f"), "reach": 3.0, "wind": 0.6, "cd": 1.6, "food": "Zarpa de oso"},
+	"conejo":  {"name": "Conejo cornudo", "temper": "timid", "ai": "melee", "body": "quad", "size": 0.55, "hp": 70.0, "r": 0.5, "speed": 5.6, "aggro": 9.0, "dmg": 8.0, "xp": 7, "color": Color("#c9b08a"), "accent": Color("#f2ead8"), "reach": 1.4, "wind": 0.35, "cd": 1.1, "food": "Carne tierna"},
+	"lobo":    {"name": "Lobo", "temper": "pack", "ai": "melee", "body": "quad", "size": 1.0, "hp": 130.0, "r": 0.8, "speed": 5.2, "aggro": 13.0, "dmg": 13.0, "xp": 12, "color": Color("#7a7f88"), "accent": Color("#5e636b"), "reach": 2.0, "wind": 0.45, "cd": 1.3, "food": ""},
+	"jabali":  {"name": "Jabalí", "temper": "neutral", "ai": "melee", "body": "quad", "size": 1.15, "hp": 190.0, "r": 0.9, "speed": 4.8, "aggro": 11.0, "dmg": 16.0, "xp": 15, "color": Color("#5b4636"), "accent": Color("#e8e0cc"), "reach": 2.0, "wind": 0.5, "cd": 1.5, "food": "Panceta de jabalí"},
+	"oso":     {"name": "Oso pardo", "temper": "territorial", "ai": "brute", "body": "quad", "size": 2.1, "hp": 900.0, "r": 1.5, "speed": 3.8, "aggro": 8.0, "dmg": 20.0, "xp": 80, "color": Color("#6b4a2e"), "accent": Color("#4a321f"), "reach": 3.0, "wind": 0.6, "cd": 1.6, "food": "Zarpa de oso"},
 	# --- Nv 15–35 · humanoides ---
-	"bandido": {"name": "Bandido", "ai": "melee", "body": "biped", "size": 1.0, "hp": 160.0, "r": 0.7, "speed": 4.8, "aggro": 13.0, "dmg": 17.0, "xp": 16, "color": Color("#6e5a44"), "accent": Color("#b23a3a"), "reach": 2.0, "wind": 0.45, "cd": 1.3, "weapon": "espada", "food": ""},
-	"arquero": {"name": "Arquero bandido", "ai": "ranged", "body": "biped", "size": 1.0, "hp": 95.0, "r": 0.7, "speed": 4.4, "aggro": 16.0, "dmg": 16.0, "xp": 15, "color": Color("#9a6b3c"), "accent": Color("#3a2a1a"), "range": 13.0, "wind": 0.75, "cd": 2.2, "weapon": "arco", "food": ""},
-	"jefe":    {"name": "Jefe bandido", "ai": "brute", "body": "biped", "size": 1.7, "hp": 1000.0, "r": 1.3, "speed": 3.8, "aggro": 15.0, "dmg": 22.0, "xp": 95, "color": Color("#4d3b2c"), "accent": Color("#b23a3a"), "reach": 3.0, "wind": 0.6, "cd": 1.6, "weapon": "hacha", "food": ""},
+	"bandido": {"name": "Bandido", "temper": "camp", "ai": "melee", "body": "biped", "size": 1.0, "hp": 160.0, "r": 0.7, "speed": 4.8, "aggro": 13.0, "dmg": 17.0, "xp": 16, "color": Color("#6e5a44"), "accent": Color("#b23a3a"), "reach": 2.0, "wind": 0.45, "cd": 1.3, "weapon": "espada", "food": ""},
+	"arquero": {"name": "Arquero bandido", "temper": "camp", "ai": "ranged", "body": "biped", "size": 1.0, "hp": 95.0, "r": 0.7, "speed": 4.4, "aggro": 16.0, "dmg": 16.0, "xp": 15, "color": Color("#9a6b3c"), "accent": Color("#3a2a1a"), "range": 13.0, "wind": 0.75, "cd": 2.2, "weapon": "arco", "food": ""},
+	"jefe":    {"name": "Jefe bandido", "temper": "camp", "ai": "brute", "body": "biped", "size": 1.7, "hp": 1000.0, "r": 1.3, "speed": 3.8, "aggro": 15.0, "dmg": 22.0, "xp": 95, "color": Color("#4d3b2c"), "accent": Color("#b23a3a"), "reach": 3.0, "wind": 0.6, "cd": 1.6, "weapon": "hacha", "food": ""},
 	# --- Nv 35–45 · orcos, goblins y parientes ---
-	"goblin":  {"name": "Goblin", "ai": "melee", "body": "biped", "size": 0.7, "hp": 120.0, "r": 0.55, "speed": 6.0, "aggro": 14.0, "dmg": 14.0, "xp": 14, "color": Color("#6f9a3a"), "accent": Color("#4a3a26"), "reach": 1.6, "wind": 0.35, "cd": 0.9, "weapon": "daga", "food": ""},
-	"hondero": {"name": "Goblin hondero", "ai": "ranged", "body": "biped", "size": 0.7, "hp": 85.0, "r": 0.55, "speed": 5.0, "aggro": 16.0, "dmg": 15.0, "xp": 14, "color": Color("#7fa548"), "accent": Color("#4a3a26"), "range": 12.0, "wind": 0.6, "cd": 1.8, "weapon": "honda", "food": ""},
-	"orco":    {"name": "Orco", "ai": "melee", "body": "biped", "size": 1.35, "hp": 320.0, "r": 1.0, "speed": 4.2, "aggro": 13.0, "dmg": 24.0, "xp": 28, "color": Color("#5d7552"), "accent": Color("#3b3b3b"), "reach": 2.4, "wind": 0.6, "cd": 1.6, "weapon": "hacha", "food": ""},
-	"ogro":    {"name": "Ogro", "ai": "brute", "body": "brute", "size": 1.0, "hp": 950.0, "r": 1.6, "speed": 3.6, "aggro": 15.0, "dmg": 22.0, "xp": 90, "color": Color("#7d5a3c"), "accent": Color("#9b7653"), "reach": 3.2, "wind": 0.6, "cd": 1.6, "food": "Hígado de ogro"},
+	"goblin":  {"name": "Goblin", "temper": "coward", "ai": "melee", "body": "biped", "size": 0.7, "hp": 120.0, "r": 0.55, "speed": 6.0, "aggro": 14.0, "dmg": 14.0, "xp": 14, "color": Color("#6f9a3a"), "accent": Color("#4a3a26"), "reach": 1.6, "wind": 0.35, "cd": 0.9, "weapon": "daga", "food": ""},
+	"hondero": {"name": "Goblin hondero", "temper": "coward", "ai": "ranged", "body": "biped", "size": 0.7, "hp": 85.0, "r": 0.55, "speed": 5.0, "aggro": 16.0, "dmg": 15.0, "xp": 14, "color": Color("#7fa548"), "accent": Color("#4a3a26"), "range": 12.0, "wind": 0.6, "cd": 1.8, "weapon": "honda", "food": ""},
+	"orco":    {"name": "Orco", "temper": "camp", "ai": "melee", "body": "biped", "size": 1.35, "hp": 320.0, "r": 1.0, "speed": 4.2, "aggro": 13.0, "dmg": 24.0, "xp": 28, "color": Color("#5d7552"), "accent": Color("#3b3b3b"), "reach": 2.4, "wind": 0.6, "cd": 1.6, "weapon": "hacha", "food": ""},
+	"ogro":    {"name": "Ogro", "temper": "camp", "ai": "brute", "body": "brute", "size": 1.0, "hp": 950.0, "r": 1.6, "speed": 3.6, "aggro": 15.0, "dmg": 22.0, "xp": 90, "color": Color("#7d5a3c"), "accent": Color("#9b7653"), "reach": 3.2, "wind": 0.6, "cd": 1.6, "food": "Hígado de ogro"},
 	# --- Nv 45+ · criaturas de las cumbres ---
-	"golem":   {"name": "Gólem de piedra", "ai": "brute", "body": "brute", "size": 1.15, "hp": 1300.0, "r": 1.7, "speed": 3.0, "aggro": 12.0, "dmg": 26.0, "xp": 120, "color": Color("#8a8a82"), "accent": Color("#6f9a5a"), "reach": 3.4, "wind": 0.75, "cd": 1.9, "food": "Musgo de gólem"},
-	"espectro":{"name": "Espectro", "ai": "ranged", "body": "biped", "size": 1.1, "hp": 180.0, "r": 0.7, "speed": 5.0, "aggro": 17.0, "dmg": 22.0, "xp": 26, "color": Color("#8b7fd6"), "accent": Color("#d9d2ff"), "range": 14.0, "wind": 0.7, "cd": 2.0, "weapon": "", "food": ""},
-	"troll":   {"name": "Troll de las nieves", "ai": "melee", "body": "brute", "size": 0.8, "hp": 520.0, "r": 1.3, "speed": 4.0, "aggro": 13.0, "dmg": 28.0, "xp": 40, "color": Color("#b9c7d6"), "accent": Color("#7d8fa3"), "reach": 2.6, "wind": 0.55, "cd": 1.5, "food": "Grasa de troll"},
+	"golem":   {"name": "Gólem de piedra", "temper": "dormant", "ai": "brute", "body": "brute", "size": 1.15, "hp": 1300.0, "r": 1.7, "speed": 3.0, "aggro": 12.0, "dmg": 26.0, "xp": 120, "color": Color("#8a8a82"), "accent": Color("#6f9a5a"), "reach": 3.4, "wind": 0.75, "cd": 1.9, "food": "Musgo de gólem"},
+	"espectro":{"name": "Espectro", "temper": "ghost", "ai": "ranged", "body": "biped", "size": 1.1, "hp": 180.0, "r": 0.7, "speed": 5.0, "aggro": 17.0, "dmg": 22.0, "xp": 26, "color": Color("#8b7fd6"), "accent": Color("#d9d2ff"), "range": 14.0, "wind": 0.7, "cd": 2.0, "weapon": "", "food": ""},
+	"troll":   {"name": "Troll de las nieves", "temper": "regen", "ai": "melee", "body": "brute", "size": 0.8, "hp": 520.0, "r": 1.3, "speed": 4.0, "aggro": 13.0, "dmg": 28.0, "xp": 40, "color": Color("#b9c7d6"), "accent": Color("#7d8fa3"), "reach": 2.6, "wind": 0.55, "cd": 1.5, "food": "Grasa de troll"},
 }
 
 # franjas de nivel del mundo (para nombres de zona y colores)

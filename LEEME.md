@@ -54,3 +54,10 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
   - Nv 45+ · criaturas de las cumbres del norte (gólem, espectro, troll de las nieves), entre ruinas.
 - Varios bichos sueltan ingredientes de cocina (panceta de jabalí, musgo de gólem…).
 - Cercos rústicos de madera en granjas y praderas: bloquean, pero los dashes los atraviesan.
+
+## Comportamiento de los monstruos (estilo BotW)
+- **Sospecha "?"**: cuando te ven se llena un medidor; al llenarse sale "!" y te atacan. De espaldas te ven menos; en el pasto, casi nada.
+- **Ataque sigiloso**: si golpeás a un bicho que no te vio (o duerme), hace el doble de daño.
+- **Campamentos**: la mitad duerme junto al fuego ("Zzz"); el arquero es vigía y ve más lejos. El que te ve grita "¡Alerta!" y despierta al resto.
+- **Te perdió en el pasto**: va a buscarte adonde te vio por última vez, mira para todos lados y vuelve.
+- Conejo cornudo huye · jabalí no ataca si no lo provocás, pero embiste en línea · lobos rodean y entran de a uno · oso solo ataca de cerca · goblins huyen heridos y salen corriendo si cae el ogro · gólem duerme como roca hasta que lo pisás · espectro casi invisible, se teletransporta · troll se regenera si dejás de pegarle (el fuego lo frena).

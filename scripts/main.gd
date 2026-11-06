@@ -60,6 +60,23 @@ class Mob:
 	var lvl := 1
 	var tier := 0
 	var mult := 1.0
+	# comportamiento (estilo BotW)
+	var camp := -1
+	var state := "idle"         # idle, rest, dormant, flee, search, alert
+	var init_state := "idle"
+	var sentinel := false
+	var sus := 0.0               # sospecha: "?" se llena hasta "!"
+	var flee_t := 0.0
+	var search_t := 0.0
+	var last_seen := Vector2.ZERO
+	var wander_t := 0.0
+	var wx := 0.0
+	var wz := 0.0
+	var wake_t := 0.0
+	var hit_t := 99.0
+	var orbit := 1.0
+	var charge = null
+	var blink_t := 4.0
 	var d := {}
 	var x := 0.0
 	var z := 0.0
@@ -1546,6 +1563,18 @@ func spawn_mobs() -> void:
 				var q := free_spot(cp.pos + Vector2(r.randf_range(-5, 5), r.randf_range(-5, 5)), 1.0)
 				var m := make_mob(entry[0], q.x, q.y, lv)
 				m.tier = int(cp.tier)
+				m.camp = camps.find(cp)
+				m.orbit = 1.0 if r.randf() < 0.5 else -1.0
+				var tp: String = m.d.temper
+				if tp == "dormant":
+					m.init_state = "dormant"
+				elif tp in ["camp", "coward"]:
+					if m.d.ai == "ranged" and not cp.has("vigia"):
+						cp["vigia"] = true
+						m.sentinel = true          # el vigía ve más lejos
+					elif r.randf() < 0.5:
+						m.init_state = "rest"      # duerme junto al fuego
+				m.state = m.init_state
 				mobs.append(m)
 
 func make_mob(type: String, x: float, z: float, lvl := 5) -> Mob:
@@ -1978,6 +2007,7 @@ func env_hit(m: Mob, dmg: float, stun: float, color: Color) -> void:
 	dmg = round(dmg)
 	m.hp -= dmg
 	m.flash = 0.12
+	m.hit_t = 0.0
 	if stun > 0:
 		m.stun_t = max(m.stun_t, stun)
 		m.wind = 0
@@ -2827,10 +2857,23 @@ func hit_mob(m: Mob, base, o: Dictionary) -> void:
 			m.void_mark = 3
 		if pa.effect == "mark":
 			m.mark = 4
+	if not m.aggroed and m.state != "flee":
+		dmg *= 2.0                       # ataque sigiloso: no te había visto (o dormía)
+		special = true
+		add_text(Vector3(m.x, m.d.r * 2 + 3.0, m.z), "¡Ataque sigiloso!", Color("#f2cc60"), 14)
 	dmg = round(dmg)
 	m.hp -= dmg
 	m.flash = 0.12
-	m.aggroed = true
+	m.hit_t = 0.0
+	m.wake_t = 0.0
+	if m.d.temper == "timid":
+		start_flee(m, 3.5)
+	elif not m.aggroed and m.state != "flee":
+		m.state = "idle"
+		provoke(m)
+		m.wake_t = 0.0
+		m.state = "alert"
+		m.aggroed = true
 	P.reveal_t = 1.0                 # atacar desde el pasto te revela un momento
 	P.calm = 0
 	if s.has("stun"):
@@ -2855,6 +2898,10 @@ func kill(m: Mob) -> void:
 		return
 	m.dead = 7.0
 	m.node.visible = false
+	if m.d.ai == "brute" and m.camp >= 0:
+		for o in mobs:
+			if o.camp == m.camp and o.dead <= 0 and o.d.temper == "coward":
+				start_flee(o, 5.0)       # cayó el jefe: los goblins salen corriendo
 	if m.slam:
 		m.slam.node.queue_free()
 		m.slam = null
@@ -3205,6 +3252,9 @@ func update_mobs(dt: float) -> void:
 				m.slow_t = 0
 				m.mark = 0
 				m.void_mark = 0
+				m.state = m.init_state
+				m.sus = 0
+				m.charge = null
 				m.node.visible = true
 			continue
 		m.flash = max(0.0, m.flash - dt)
@@ -3221,18 +3271,59 @@ func update_mobs(dt: float) -> void:
 			continue
 		var dP := d2(m.x, m.z, P.x, P.z)
 		var home := d2(m.x, m.z, m.sx, m.sz)
-		if P.dead > 0 or in_safe or home > 32:
-			m.aggroed = false
-		elif not m.aggroed and dP < m.d.aggro and not P.camo and (not P.hidden or dP < 2.5):
-			m.aggroed = true
-		elif m.aggroed and P.hidden and dP > 3.0:
-			m.aggroed = false        # te perdió de vista en el pasto
-			add_text(Vector3(m.x, m.d.r * 2 + 2.0, m.z), "?", Color("#c9d1d9"), 18)
+		m.hit_t += dt
 		var spd: float = m.d.speed * (1.0 - max(m.slow_v if m.slow_t > 0 else 0.0, zone_slow))
-		if m.aggroed:
+		if not think(m, dt, dP, home, in_safe, spd):
+			continue
+		if true:
 			var n := Vector2(P.x - m.x, P.z - m.z).normalized()
 			m.fx = n.x
 			m.fz = n.y
+			# troll: se regenera si hace rato que no lo golpeás
+			if m.d.temper == "regen" and m.hit_t > 4.0 and m.hp < m.max_hp:
+				m.hp = min(m.max_hp, m.hp + m.max_hp * 0.03 * dt)
+			# espectro: se teletransporta a tu alrededor
+			if m.d.temper == "ghost" and m.wind <= 0:
+				m.blink_t -= dt
+				if m.blink_t <= 0:
+					m.blink_t = 4.5 + randf() * 2.0
+					var a := randf() * TAU
+					var q := Vector2(P.x, P.z) + Vector2(cos(a), sin(a)) * randf_range(7.0, 10.0)
+					if not blocked(q.x, q.y, 0.6):
+						flash_fx("ring", m.x, m.z, 1.5, Vector2(0, 1), Color("#8b7fd6"))
+						m.x = q.x
+						m.z = q.y
+						flash_fx("ring", m.x, m.z, 1.5, Vector2(0, 1), Color("#8b7fd6"))
+			# jabalí: embestida en línea
+			if m.d.temper == "neutral":
+				if m.charge:
+					m.charge.t -= dt
+					if m.charge.t > 0:
+						tele_progress(m.charge.node, dt)
+						continue
+					var step: float = 15.0 * dt
+					mob_step(m, m.charge.d.x * step, m.charge.d.y * step)
+					m.charge.left -= step
+					if not m.charge.hit and d2(m.x, m.z, P.x, P.z) < m.d.r + 1.0:
+						m.charge.hit = true
+						hurt_player(m.d.dmg * 1.6)
+					if m.charge.left <= 0:
+						m.charge.node.queue_free()
+						m.charge = null
+						m.atk_cd = 2.5
+					continue
+				m.atk_cd -= dt
+				if m.atk_cd <= 0 and dP > 3.5 and dP < 12.0:
+					m.charge = {"d": n, "t": 0.6, "left": 12.0, "hit": false, "node": telegraph_line(m.x, m.z, n, 12.0, 1.6, 0.6, Color("#f85149"))}
+					continue
+			# lobos: rodean y entran de a uno
+			if m.d.temper == "pack" and m.wind <= 0 and m.atk_cd > 0:
+				m.atk_cd -= dt
+				var tang: Vector2 = Vector2(-n.y, n.x) * m.orbit
+				var want: float = (dP - 5.0) * 0.6
+				var mv: Vector2 = (tang + n * want).normalized()
+				mob_step(m, mv.x * spd * 0.8 * dt, mv.y * spd * 0.8 * dt)
+				continue
 			if m.d.ai == "brute":
 				if m.slam:
 					m.slam.t -= dt
@@ -3301,7 +3392,7 @@ func update_mobs(dt: float) -> void:
 				if m.wind <= 0:
 					if d2(m.x, m.z, P.x, P.z) < reach + 0.8:
 						hurt_player(m.d.dmg)
-					m.atk_cd = m.d.cd
+					m.atk_cd = m.d.cd + (randf_range(1.0, 2.5) if m.d.temper == "pack" else 0.0)
 				continue
 			m.atk_cd -= dt
 			if dP < reach:
@@ -3309,16 +3400,6 @@ func update_mobs(dt: float) -> void:
 					m.wind = m.d.wind
 			else:
 				mob_step(m, n.x * spd * dt, n.y * spd * dt)
-		else:
-			if m.tele:
-				clear_tele(m)
-				m.wind = 0
-			if home > 0.5:
-				var n := Vector2(m.sx - m.x, m.sz - m.z).normalized()
-				mob_step(m, n.x * spd * 1.4 * dt, n.y * spd * 1.4 * dt)
-				m.fx = n.x
-				m.fz = n.y
-			m.hp = min(m.max_hp, m.hp + m.max_hp * 0.25 * dt)
 	# separación entre enemigos
 	for i in mobs.size():
 		for j in range(i + 1, mobs.size()):
@@ -3336,6 +3417,175 @@ func update_mobs(dt: float) -> void:
 				a.z -= dz / dd * p
 				b.x += dx / dd * p
 				b.z += dz / dd * p
+
+# ----------------------------------------------------------------- comportamiento (estilo BotW)
+# devuelve true si el bicho está en combate; si no, se ocupa de él (pasear, dormir, huir, buscar)
+func think(m: Mob, dt: float, dP: float, home: float, in_safe: bool, spd: float) -> bool:
+	var tp: String = m.d.temper
+	# se fue muy lejos de casa, moriste o entraste a una ciudad: vuelve
+	if m.aggroed and (P.dead > 0 or in_safe or home > 34.0):
+		calm(m)
+	# huir (animales tímidos, goblins y lobos heridos, jabalí casi muerto)
+	if m.state == "flee":
+		m.flee_t -= dt
+		var away := Vector2(m.x - P.x, m.z - P.z).normalized()
+		if home > 28.0:
+			away = (away + Vector2(m.sx - m.x, m.sz - m.z).normalized()).normalized()
+		mob_step(m, away.x * spd * 1.25 * dt, away.y * spd * 1.25 * dt)
+		m.fx = away.x
+		m.fz = away.y
+		if m.flee_t <= 0:
+			if tp == "timid" or m.hp < m.max_hp * 0.25:
+				calm(m)
+			else:
+				m.state = "alert"         # se recompone y vuelve a la pelea
+				m.aggroed = true
+		return false
+	if m.aggroed:
+		# herido: algunos huyen
+		if (tp == "coward" and m.hp < m.max_hp * 0.3) or (tp in ["pack", "neutral"] and m.hp < m.max_hp * 0.2):
+			start_flee(m, 3.0)
+			return false
+		# te perdió en el pasto: va a buscarte adonde te vio por última vez
+		if P.hidden and dP > 3.0:
+			m.aggroed = false
+			m.state = "search"
+			m.search_t = 5.0
+			m.last_seen = Vector2(P.x, P.z)
+			add_text(Vector3(m.x, m.d.r * 2 + 2.0, m.z), "?", Color("#c9d1d9"), 18)
+			return false
+		m.last_seen = Vector2(P.x, P.z)
+		return true
+	if m.tele:
+		clear_tele(m)
+		m.wind = 0
+	if m.charge:
+		m.charge.node.queue_free()
+		m.charge = null
+	# despertando (gólem saliendo de la roca, campamento sobresaltado)
+	if m.wake_t > 0:
+		m.wake_t -= dt
+		if m.wake_t <= 0:
+			m.state = "alert"
+			m.aggroed = true
+		return false
+	# percepción: rango según estado, pasto, camuflaje y si te acercás por la espalda
+	var rad: float = m.d.aggro * (1.4 if m.sentinel else 1.0)
+	match m.state:
+		"rest":
+			rad *= 0.35
+		"dormant":
+			rad = 6.0
+		"search":
+			rad *= 1.2
+	if P.hidden:
+		rad = min(rad, 2.5)
+	if P.camo or P.dead > 0 or in_safe:
+		rad = 0.0
+	var toP := Vector2(P.x - m.x, P.z - m.z).normalized()
+	if m.state != "dormant" and toP.dot(Vector2(m.fx, m.fz)) < -0.3:
+		rad *= 0.6                           # de espaldas te ve menos
+	if tp == "timid":
+		if dP < rad:
+			start_flee(m, 3.5)
+		else:
+			wander(m, dt, spd, home)
+		return false
+	if dP < rad:
+		var gain: float = 1.2 + (1.0 - dP / maxf(rad, 0.1)) * 3.5
+		if tp == "neutral":
+			gain = 0.0                       # el jabalí te mira, pero no ataca si no lo provocás
+			m.fx = toP.x
+			m.fz = toP.y
+		m.sus = min(1.0, m.sus + gain * dt)
+	else:
+		m.sus = max(0.0, m.sus - 0.5 * dt)
+	if m.sus >= 1.0:
+		provoke(m)
+		return false
+	match m.state:
+		"rest", "dormant":
+			pass
+		"search":
+			m.search_t -= dt
+			var tgt := m.last_seen - Vector2(m.x, m.z)
+			if tgt.length() > 1.0:
+				var nn := tgt.normalized()
+				mob_step(m, nn.x * spd * 0.7 * dt, nn.y * spd * 0.7 * dt)
+				m.fx = nn.x
+				m.fz = nn.y
+			else:
+				var a := m.search_t * 2.0           # mira para todos lados
+				m.fx = sin(a)
+				m.fz = cos(a)
+			if m.search_t <= 0:
+				calm(m)
+		_:
+			wander(m, dt, spd, home)
+	return false
+
+func wander(m: Mob, dt: float, spd: float, home: float) -> void:
+	if home > 9.0:
+		var nh := Vector2(m.sx - m.x, m.sz - m.z).normalized()
+		mob_step(m, nh.x * spd * 1.2 * dt, nh.y * spd * 1.2 * dt)
+		m.fx = nh.x
+		m.fz = nh.y
+		m.hp = min(m.max_hp, m.hp + m.max_hp * 0.25 * dt)
+		return
+	m.hp = min(m.max_hp, m.hp + m.max_hp * 0.25 * dt)
+	m.wander_t -= dt
+	if m.wander_t <= 0:
+		m.wander_t = randf_range(3.0, 7.0)
+		var a := randf() * TAU
+		m.wx = m.sx + cos(a) * randf_range(0.0, 6.0)
+		m.wz = m.sz + sin(a) * randf_range(0.0, 6.0)
+	var d := Vector2(m.wx - m.x, m.wz - m.z)
+	if d.length() > 0.6 and m.wander_t < 5.0:
+		var nn := d.normalized()
+		mob_step(m, nn.x * spd * 0.3 * dt, nn.y * spd * 0.3 * dt)
+		m.fx = lerp(m.fx, nn.x, 0.1)
+		m.fz = lerp(m.fz, nn.y, 0.1)
+
+func calm(m: Mob) -> void:
+	m.aggroed = false
+	m.sus = 0.0
+	m.state = "dormant" if m.init_state == "dormant" else "idle"
+	m.flee_t = 0.0
+
+func start_flee(m: Mob, t: float) -> void:
+	if m.state != "flee":
+		add_text(Vector3(m.x, m.d.r * 2 + 2.0, m.z), "¡!" if m.d.temper == "timid" else "¡Huye!", Color("#c9d1d9"), 14)
+	m.state = "flee"
+	m.flee_t = t
+	m.aggroed = false
+
+# te descubrió: "!" y, si vive en campamento o manada, avisa a los suyos
+func provoke(m: Mob, chain := true) -> void:
+	if m.aggroed or m.state == "flee" or m.wake_t > 0 or m.dead > 0:
+		return
+	m.sus = 1.0
+	if m.d.temper == "timid":
+		start_flee(m, 3.5)
+		return
+	if m.state == "dormant":
+		m.wake_t = 1.4
+		m.state = "waking"
+		add_text(Vector3(m.x, m.d.r * 2 + 3.0, m.z), "¡%s despierta!" % m.d.name, Color("#f85149"), 16)
+		return
+	if m.state == "rest":
+		m.wake_t = 0.8                     # se levanta medio dormido
+		m.state = "waking"
+		add_text(Vector3(m.x, m.d.r * 2 + 2.4, m.z), "¡!", Color("#f85149"), 20)
+	else:
+		m.state = "alert"
+		m.aggroed = true
+		add_text(Vector3(m.x, m.d.r * 2 + 2.4, m.z), "¡GRRR!" if m.d.temper == "territorial" else "!", Color("#f85149"), 22)
+	if chain and m.camp >= 0 and m.d.temper in ["pack", "camp", "coward"]:
+		if m.d.temper != "pack":
+			add_text(Vector3(m.x, m.d.r * 2 + 3.6, m.z), "¡Alerta!", Color("#ff9b50"), 13)
+		for o in mobs:
+			if o != m and o.camp == m.camp and o.dead <= 0 and d2(o.x, o.z, m.x, m.z) < 35.0:
+				provoke(o, false)
 
 # los enemigos también chocan con muros: si no pueden pasar, se deslizan por el costado
 func mob_step(m: Mob, dx: float, dz: float) -> void:
@@ -3529,9 +3779,23 @@ func render_frame() -> void:
 		if m.dead > 0:
 			continue
 		m.node.position = Vector3(m.x, H(m.x, m.z), m.z)
+		var sy := 1.0
+		if m.state == "rest":
+			sy = 0.72                    # sentado/durmiendo
+		elif m.state == "dormant":
+			sy = 0.55                    # hecho roca
+		elif m.state == "waking":
+			sy = lerp(1.0, 0.6, clamp(m.wake_t / 1.4, 0.0, 1.0))
+		m.node.scale.y = lerp(m.node.scale.y, sy, 0.15)
+		if m.d.temper == "ghost":
+			var al: float = 0.85 if (m.aggroed or d2(P.x, P.z, m.x, m.z) < 11.0) else 0.12
+			for mt in m.mats:
+				mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mt.albedo_color.a = lerp(mt.albedo_color.a, al, 0.1)
 		m.node.rotation.y = atan2(m.fx, m.fz)
 		for i in m.mats.size():
 			var base: Color = m.base_colors[i]
+			base.a = m.mats[i].albedo_color.a
 			if m.flash > 0:
 				m.mats[i].albedo_color = base.lerp(Color.WHITE, 0.6)
 			elif m.wind > 0 or m.slam:
@@ -3564,7 +3828,21 @@ func draw_overlay() -> void:
 	for m in mobs:
 		if m.dead > 0:
 			continue
-		var near: bool = d2(P.x, P.z, m.x, m.z) < 24.0
+		var dpm: float = d2(P.x, P.z, m.x, m.z)
+		var near: bool = dpm < 24.0
+		if m.state == "dormant" or (m.d.temper == "ghost" and not m.aggroed and dpm > 11.0):
+			continue                     # parece una roca / no se ve
+		if dpm < 30.0 and not m.aggroed:
+			var ip := Vector3(m.x, H(m.x, m.z) + m.d.r * 2 + 2.2, m.z)
+			if not camera.is_position_behind(ip):
+				var q := camera.unproject_position(ip)
+				if m.state == "rest":
+					overlay.draw_string_outline(font, q + Vector2(-20, -14), "Zzz", HORIZONTAL_ALIGNMENT_CENTER, 40, 13, 3, Color(0, 0, 0, 0.7))
+					overlay.draw_string(font, q + Vector2(-20, -14), "Zzz", HORIZONTAL_ALIGNMENT_CENTER, 40, 13, Color("#c9d1d9"))
+				if m.sus > 0.02:
+					overlay.draw_rect(Rect2(q.x - 9, q.y - 40, 18, 22), Color(0, 0, 0, 0.55))
+					overlay.draw_rect(Rect2(q.x - 9, q.y - 40 + 22 * (1.0 - m.sus), 18, 22 * m.sus), Color(0.95, 0.8, 0.38, 0.85))
+					overlay.draw_string(font, Vector2(q.x - 9, q.y - 23), "?", HORIZONTAL_ALIGNMENT_CENTER, 18, 16, Color.WHITE)
 		if m.hp >= m.max_hp and m.d.ai != "brute" and m.mark <= 0 and m.stun_t <= 0 and not near:
 			continue
 		var wp := Vector3(m.x, H(m.x, m.z) + m.d.r * 2 + 1.3, m.z)
