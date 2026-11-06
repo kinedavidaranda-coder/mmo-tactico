@@ -36,3 +36,10 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - **Pasto alto:** si estás adentro, los enemigos no te ven (los que te perseguían te pierden de vista). Atacar te revela un segundo. Se puede quemar.
 - **Muros y construcciones:** murallas de Lumen, torres de vigía, ruinas, granjas con cercos y muros cerca de los campamentos. Bloquean el paso a pie (a vos y a los enemigos).
 - **Dash, saltos y teletransportes atraviesan los muros**, como en MLBB: sirven para escapar o emboscar. Si el dash terminaría adentro de un muro, te deja del otro lado.
+
+## Vegetación y árboles que se rompen
+- Cuatro especies (pinos, árboles redondos, abedules y de otoño) en tres tamaños, más pasto bajo y flores que solo se dibujan cerca de la cámara.
+- **Chicos:** se rompen con un par de golpes. **Medianos:** aguantan; los voltea una habilidad fuerte o varios golpes. **Grandes:** no se rompen y bloquean el paso.
+- El daño que hacés es el que reciben, así que cuanto más fuerte sos (rangos de habilidad), más fácil los volteás. Los proyectiles chocan con los troncos.
+- Al caer dejan un tocón y dan madera (chico 1, mediano 3). Vuelven a crecer a los 90 segundos.
+- Hay cuatro árboles antiguos gigantes como puntos de referencia del mapa.

@@ -142,6 +142,21 @@ class Cell:
 	var base_y := 0.0
 	var tint := Color.WHITE
 
+class TreeObj:
+	var x := 0.0
+	var z := 0.0
+	var sp := 0                # especie (índice de malla)
+	var idx := 0               # índice dentro del MultiMesh de su especie
+	var id := 0                # índice general (para el tocón)
+	var sc := 1.0
+	var rot := 0.0
+	var size := 1              # 0 chico, 1 mediano, 2 grande (no se rompe)
+	var hp := 0.0
+	var max_hp := 0.0
+	var alive := true
+	var regrow := 0.0
+	var grow := 1.0
+
 class Puddle:
 	var x := 0.0
 	var z := 0.0
@@ -168,6 +183,15 @@ var texts: Array = []
 var cells := {}
 var cell_list: Array = []
 var grass_mm: MultiMesh
+var trees: Array = []
+var tree_mms: Array = []           # un MultiMesh por especie
+var tree_meshes: Array = []
+var veg_mat: StandardMaterial3D
+var stump_mm: MultiMesh
+var tree_grid := {}
+var falling: Array = []
+var regrowing: Array = []
+var wood := 0
 var colliders: Array = []          # muros y edificios: cajas en el plano (centro, medio tamaño, giro)
 var col_grid := {}                  # grilla de 16 m para buscar colisiones rápido
 var puddles: Array = []
@@ -440,9 +464,9 @@ func build_environment() -> void:
 	e.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color("#4f8fd6")
-	sm.sky_horizon_color = Color("#bfdcf2")
-	sm.ground_horizon_color = Color("#bfdcf2")
+	sm.sky_top_color = Color("#3f7fd0")
+	sm.sky_horizon_color = Color("#f2dcc0")
+	sm.ground_horizon_color = Color("#e8d6bf")
 	sm.ground_bottom_color = Color("#6a8a5a")
 	sky.sky_material = sm
 	e.sky = sky
@@ -451,18 +475,21 @@ func build_environment() -> void:
 	e.ambient_light_energy = 0.45
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	e.fog_enabled = true
-	e.fog_light_color = Color("#c9e0f2")
+	e.fog_light_color = Color("#e6dccb")
 	e.fog_density = 0.0022
 	e.fog_sky_affect = 0.3
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.tonemap_exposure = 0.9
 	e.tonemap_white = 1.6
+	e.adjustment_enabled = true
+	e.adjustment_saturation = 1.18
+	e.adjustment_contrast = 1.06
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-55, 35, 0)
+	sun.rotation_degrees = Vector3(-38, 55, 0)
 	sun.light_energy = 0.85
-	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.light_color = Color(1.0, 0.9, 0.74)
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 140.0
 	add_child(sun)
@@ -737,32 +764,52 @@ func build_structures() -> void:
 				wall_run(c + dir * 6, c + dir * 6 + Vector2(-dir.y, dir.x) * 6, 1.2, 2.6, old, 0.0, r)
 
 # árboles y rocas con MultiMesh: miles de copias en pocas llamadas de dibujo
-func tree_mesh(pine: bool) -> ArrayMesh:
+const SPECIES = ["pino", "redondo", "abedul", "otono"]
+const TREE_HP = [35.0, 180.0, INF]
+
+func tree_mesh(kind: String) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var trunk := CylinderMesh.new()
-	trunk.top_radius = 0.22
-	trunk.bottom_radius = 0.32
-	trunk.height = 1.6
 	trunk.radial_segments = 6
-	st.set_color(Color("#6b4a2b"))
-	append_mesh(st, trunk, Transform3D(Basis(), Vector3(0, 0.8, 0)), Color("#6b4a2b"))
-	if pine:
-		for k in 3:
-			var c := CylinderMesh.new()
-			c.top_radius = 0.01
-			c.bottom_radius = 1.7 - k * 0.4
-			c.height = 2.2
-			c.radial_segments = 7
-			append_mesh(st, c, Transform3D(Basis(), Vector3(0, 2.2 + k * 1.2, 0)), Color("#2f6b3f").lightened(k * 0.06))
+	if kind == "abedul":
+		trunk.top_radius = 0.14
+		trunk.bottom_radius = 0.2
+		trunk.height = 3.0
+		append_mesh(st, trunk, Transform3D(Basis(), Vector3(0, 1.5, 0)), Color("#e9e4d8"))
 	else:
-		var sp := SphereMesh.new()
-		sp.radius = 1.6
-		sp.height = 2.8
-		sp.radial_segments = 8
-		sp.rings = 5
-		append_mesh(st, sp, Transform3D(Basis(), Vector3(0, 2.9, 0)), Color("#4f8f3a"))
-		append_mesh(st, sp, Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(0.7, 3.7, 0.3)), Color("#5fa043"))
+		trunk.top_radius = 0.22
+		trunk.bottom_radius = 0.32
+		trunk.height = 1.6
+		append_mesh(st, trunk, Transform3D(Basis(), Vector3(0, 0.8, 0)), Color("#6b4a2b"))
+	match kind:
+		"pino":
+			for k in 3:
+				var c := CylinderMesh.new()
+				c.top_radius = 0.01
+				c.bottom_radius = 1.7 - k * 0.4
+				c.height = 2.2
+				c.radial_segments = 7
+				append_mesh(st, c, Transform3D(Basis(), Vector3(0, 2.2 + k * 1.2, 0)), Color("#2f6b3f").lightened(k * 0.06))
+		"abedul":
+			var sp := SphereMesh.new()
+			sp.radius = 1.0
+			sp.height = 2.6
+			sp.radial_segments = 8
+			sp.rings = 5
+			append_mesh(st, sp, Transform3D(Basis(), Vector3(0, 3.6, 0)), Color("#9cc64a"))
+			append_mesh(st, sp, Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(0.5, 2.9, 0.2)), Color("#b3d45a"))
+		_:
+			var top := Color("#4f8f3a") if kind == "redondo" else Color("#d9822b")
+			var top2 := Color("#5fa043") if kind == "redondo" else Color("#e6a33a")
+			var sp := SphereMesh.new()
+			sp.radius = 1.6
+			sp.height = 2.8
+			sp.radial_segments = 8
+			sp.rings = 5
+			append_mesh(st, sp, Transform3D(Basis(), Vector3(0, 2.9, 0)), top)
+			append_mesh(st, sp, Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(0.7, 3.7, 0.3)), top2)
+			append_mesh(st, sp, Transform3D(Basis().scaled(Vector3.ONE * 0.6), Vector3(-0.8, 3.3, -0.4)), top.darkened(0.08))
 	st.generate_normals()
 	return st.commit()
 
@@ -774,12 +821,46 @@ func append_mesh(st: SurfaceTool, m: PrimitiveMesh, xf: Transform3D, c: Color) -
 		st.set_color(c)
 		st.add_vertex(xf * verts[i])
 
+func pick_species(x: float, z: float, r: RandomNumberGenerator) -> int:
+	var q := r.randf()
+	if z < -150.0:
+		return 0 if q < 0.7 else 2
+	if x > 150.0:
+		return 0 if q < 0.45 else (1 if q < 0.8 else 3)
+	if z > 150.0:
+		return 1 if q < 0.6 else 3
+	return 1 if q < 0.5 else (2 if q < 0.75 else (3 if q < 0.9 else 0))
+
+func tree_xform(t: TreeObj) -> Transform3D:
+	var s2: float = t.sc * t.grow
+	return Transform3D(Basis(Vector3.UP, t.rot).scaled(Vector3.ONE * max(0.001, s2)), Vector3(t.x, terrain.height(t.x, t.z) - 0.1, t.z))
+
+func add_tree(x: float, z: float, sp: int, size: int, sc: float, rot: float) -> void:
+	var t := TreeObj.new()
+	t.x = x
+	t.z = z
+	t.sp = sp
+	t.size = size
+	t.sc = sc
+	t.rot = rot
+	t.max_hp = TREE_HP[size] * (0.7 + sc * 0.3)
+	t.hp = t.max_hp
+	t.id = trees.size()
+	trees.append(t)
+	var k := Vector2i(int(floor(x / 16.0)), int(floor(z / 16.0)))
+	if not tree_grid.has(k):
+		tree_grid[k] = []
+	tree_grid[k].append(t)
+	if size == 2:
+		add_collider(Vector2(x, z), Vector2(0.3, 0.3) * sc, 0.0)    # los grandes bloquean el paso
+
 func build_vegetation() -> void:
 	var r := RandomNumberGenerator.new()
 	r.seed = 4242
-	var pines := []
-	var rounds := []
 	var rocks := []
+	# árboles antiguos gigantes: puntos de referencia del mapa
+	for g in [[Vector2(-150, -55), 1], [Vector2(215, -5), 3], [Vector2(70, 300), 1], [Vector2(-330, -200), 0]]:
+		add_tree(g[0].x, g[0].y, g[1], 2, 4.6, r.randf() * TAU)
 	var step := 6.0
 	var x := -Terrain.HALF + 10.0
 	while x < Terrain.HALF - 10.0:
@@ -789,30 +870,60 @@ func build_vegetation() -> void:
 			var pz := z + r.randf_range(-2.5, 2.5)
 			var dens: float = 0.0 if blocked(px, pz, 2.5) else terrain.tree_density(px, pz)
 			if r.randf() < dens:
-				var t := Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.8, 1.5)), Vector3(px, terrain.height(px, pz) - 0.1, pz))
-				if pz < -150.0 or (px > 150.0 and r.randf() < 0.55):
-					pines.append(t)
-				else:
-					rounds.append(t)
+				var q := r.randf()
+				var size := 0 if q < 0.4 else (1 if q < 0.92 or dens < 0.25 else 2)
+				var sc: float = [r.randf_range(0.45, 0.7), r.randf_range(0.85, 1.3), r.randf_range(1.9, 2.6)][size]
+				add_tree(px, pz, pick_species(px, pz, r), size, sc, r.randf() * TAU)
 			elif r.randf() < 0.012 and terrain.height(px, pz) > 1.0 and terrain.road_dist(Vector2(px, pz)) > 6.0 and Vector2(px, pz).length() > SAFE_R + 10:
 				var sc := r.randf_range(0.5, 1.8) * (2.0 if px < -250.0 else 1.0)
 				rocks.append(Transform3D(Basis(Vector3(r.randf(), 1, r.randf()).normalized(), r.randf() * TAU).scaled(Vector3(sc, sc * 0.7, sc)), Vector3(px, terrain.height(px, pz), pz)))
 			z += step
 		x += step
-	var veg_mat := StandardMaterial3D.new()
+	veg_mat = StandardMaterial3D.new()
 	veg_mat.vertex_color_use_as_albedo = true
 	veg_mat.roughness = 0.9
-	for spec in [[tree_mesh(true), pines], [tree_mesh(false), rounds]]:
-		add_multimesh(spec[0], spec[1], veg_mat)
+	var counts := [0, 0, 0, 0]
+	for t in trees:
+		t.idx = counts[t.sp]
+		counts[t.sp] += 1
+	for k in SPECIES.size():
+		tree_meshes.append(tree_mesh(SPECIES[k]))
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = tree_meshes[k]
+		mm.instance_count = counts[k]
+		tree_mms.append(mm)
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = mm
+		mi.material_override = veg_mat
+		world.add_child(mi)
+	for t in trees:
+		tree_mms[t.sp].set_instance_transform(t.idx, tree_xform(t))
+	# tocones (aparecen cuando un árbol cae)
+	var stump := CylinderMesh.new()
+	stump.top_radius = 0.28
+	stump.bottom_radius = 0.36
+	stump.height = 0.5
+	stump.radial_segments = 7
+	stump_mm = MultiMesh.new()
+	stump_mm.transform_format = MultiMesh.TRANSFORM_3D
+	stump_mm.mesh = stump
+	stump_mm.instance_count = trees.size()
+	for t in trees:
+		stump_mm.set_instance_transform(t.id, Transform3D(Basis().scaled(Vector3.ONE * 0.001), Vector3(t.x, -50, t.z)))
+	var smi := MultiMeshInstance3D.new()
+	smi.multimesh = stump_mm
+	smi.material_override = mat(Color("#8a6440"))
+	world.add_child(smi)
 	var rock := SphereMesh.new()
 	rock.radius = 1.0
 	rock.height = 1.6
 	rock.radial_segments = 6
 	rock.rings = 3
-	var rmat := mat(Color("#8d8a84"))
-	add_multimesh(rock, rocks, rmat)
+	add_multimesh(rock, rocks, mat(Color("#8d8a84")))
+	build_ground_cover()
 
-func add_multimesh(mesh: Mesh, xforms: Array, m: Material) -> void:
+func add_multimesh(mesh: Mesh, xforms: Array, m: Material) -> MultiMeshInstance3D:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
@@ -823,6 +934,186 @@ func add_multimesh(mesh: Mesh, xforms: Array, m: Material) -> void:
 	mi.multimesh = mm
 	mi.material_override = m
 	world.add_child(mi)
+	return mi
+
+# ----------------------------------------------------------------- pasto bajo y flores (solo se dibujan cerca)
+func blades_mesh(n: int, hmin: float, hmax: float, spread: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 77
+	for k in n:
+		var b := Vector3(rr.randf_range(-spread, spread), 0, rr.randf_range(-spread, spread))
+		var a := rr.randf() * TAU
+		var side := Vector3(cos(a), 0, sin(a)) * 0.07
+		var tip := b + Vector3(rr.randf_range(-0.12, 0.12), rr.randf_range(hmin, hmax), rr.randf_range(-0.12, 0.12))
+		st.set_color(Color(0.85, 0.85, 0.85))
+		st.add_vertex(b - side)
+		st.set_color(Color(0.85, 0.85, 0.85))
+		st.add_vertex(b + side)
+		st.set_color(Color(1.2, 1.2, 1.1))
+		st.add_vertex(tip)
+	st.generate_normals()
+	return st.commit()
+
+func flower_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var stem := CylinderMesh.new()
+	stem.top_radius = 0.015
+	stem.bottom_radius = 0.02
+	stem.height = 0.4
+	stem.radial_segments = 4
+	append_mesh(st, stem, Transform3D(Basis(), Vector3(0, 0.2, 0)), Color(0.35, 0.6, 0.3))
+	var head := SphereMesh.new()
+	head.radius = 0.09
+	head.height = 0.12
+	head.radial_segments = 6
+	head.rings = 3
+	append_mesh(st, head, Transform3D(Basis(), Vector3(0, 0.42, 0)), Color(1, 1, 1))
+	st.generate_normals()
+	return st.commit()
+
+func build_ground_cover() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 909
+	var blades := blades_mesh(6, 0.25, 0.55, 0.35)
+	var flowers := flower_mesh()
+	var cover_mat := StandardMaterial3D.new()
+	cover_mat.vertex_color_use_as_albedo = true
+	cover_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cover_mat.roughness = 0.95
+	var petals = [Color("#ffffff"), Color("#ffe066"), Color("#c792ea"), Color("#7fb7ff"), Color("#ff8fa3")]
+	var CH := 64.0
+	var n_side := int(Terrain.SIZE / CH)
+	for cj in n_side:
+		for ci in n_side:
+			var gx := []
+			var gc := []
+			var fx := []
+			var fc := []
+			for k in 900:
+				var x := -Terrain.HALF + ci * CH + r.randf() * CH
+				var z := -Terrain.HALF + cj * CH + r.randf() * CH
+				var h: float = terrain.height(x, z)
+				if h < 0.9 or h > 40.0:
+					continue
+				var p := Vector2(x, z)
+				if terrain.road_dist(p) < 3.5 or p.length() < SAFE_R + 2.0 or blocked(x, z, 0.4):
+					continue
+				var i := int((x + Terrain.HALF) / Terrain.RES)
+				var j := int((z + Terrain.HALF) / Terrain.RES)
+				if terrain.slope_at(i, j) > 0.6:
+					continue
+				var base: Color = terrain.colors[j * Terrain.N + i]
+				gx.append(Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.7, 1.4)), Vector3(x, h - 0.03, z)))
+				gc.append(base.lightened(0.08))
+				# flores en los prados (no en el cañadón ni en el bosque cerrado)
+				if k % 14 == 0 and x > -200.0 and r.randf() < 0.6:
+					var fx2 := x + r.randf_range(-0.6, 0.6)
+					fx.append(Transform3D(Basis(Vector3.UP, r.randf() * TAU).scaled(Vector3.ONE * r.randf_range(0.8, 1.3)), Vector3(fx2, terrain.height(fx2, z), z)))
+					fc.append(petals[r.randi() % petals.size()])
+			for spec in [[blades, gx, gc], [flowers, fx, fc]]:
+				if spec[1].is_empty():
+					continue
+				var mm := MultiMesh.new()
+				mm.transform_format = MultiMesh.TRANSFORM_3D
+				mm.use_colors = true
+				mm.mesh = spec[0]
+				mm.instance_count = spec[1].size()
+				for q in spec[1].size():
+					mm.set_instance_transform(q, spec[1][q])
+					mm.set_instance_color(q, spec[2][q])
+				var mi := MultiMeshInstance3D.new()
+				mi.multimesh = mm
+				mi.material_override = cover_mat
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.visibility_range_end = 110.0
+				world.add_child(mi)
+
+# ----------------------------------------------------------------- árboles que se rompen según tu poder
+func damage_trees(x: float, z: float, r: float, dmg: float, once = null) -> void:
+	if dmg <= 0:
+		return
+	for gx in range(int(floor((x - r - 3.0) / 16.0)), int(floor((x + r + 3.0) / 16.0)) + 1):
+		for gz in range(int(floor((z - r - 3.0) / 16.0)), int(floor((z + r + 3.0) / 16.0)) + 1):
+			var k := Vector2i(gx, gz)
+			if not tree_grid.has(k):
+				continue
+			for t in tree_grid[k]:
+				if not t.alive or t.grow < 1.0:
+					continue
+				if Vector2(t.x - x, t.z - z).length() > r + 0.5 * t.sc:
+					continue
+				if once != null:
+					if once.has(t):
+						continue
+					once[t] = true
+				if t.size == 2:
+					add_text(Vector3(t.x, 2.5, t.z), "Demasiado grande", Color("#c9b48a"), 12)
+					continue
+				t.hp -= dmg
+				add_text(Vector3(t.x, 2.0 + t.sc * 2.0, t.z), str(int(dmg)), Color("#d7b98a"), 13)
+				if t.hp <= 0:
+					fell_tree(t, x, z)
+
+func fell_tree(t: TreeObj, fx: float, fz: float) -> void:
+	t.alive = false
+	t.regrow = 90.0
+	regrowing.append(t)
+	var xf := tree_xform(t)
+	tree_mms[t.sp].set_instance_transform(t.idx, Transform3D(Basis().scaled(Vector3.ONE * 0.001), Vector3(t.x, -50, t.z)))
+	stump_mm.set_instance_transform(t.id, Transform3D(Basis().scaled(Vector3.ONE * t.sc), Vector3(t.x, terrain.height(t.x, t.z) + 0.1, t.z)))
+	var node := MeshInstance3D.new()
+	node.mesh = tree_meshes[t.sp]
+	node.material_override = veg_mat
+	world.add_child(node)
+	node.transform = xf
+	var away := Vector2(t.x - fx, t.z - fz)
+	if away.length() < 0.1:
+		away = Vector2(P.fx, P.fz)
+	away = away.normalized()
+	var axis := Vector3(away.y, 0, -away.x).normalized()      # cae hacia el lado contrario al golpe
+	falling.append({"node": node, "t": 0.0, "axis": axis, "basis": xf.basis, "pos": xf.origin})
+	var got := 1 if t.size == 0 else 3
+	wood += got
+	add_text(Vector3(t.x, 3.0, t.z), "+%d madera" % got, Color("#e0b46a"), 15)
+
+func tree_at(x: float, z: float):
+	var k := Vector2i(int(floor(x / 16.0)), int(floor(z / 16.0)))
+	if not tree_grid.has(k):
+		return null
+	for t in tree_grid[k]:
+		if t.alive and Vector2(t.x - x, t.z - z).length() < 0.35 * t.sc + 0.25:
+			return t
+	return null
+
+func update_trees(dt: float) -> void:
+	for i in range(falling.size() - 1, -1, -1):
+		var f: Dictionary = falling[i]
+		f.t += dt
+		var ang: float = min(PI / 2.0, f.t * f.t * 3.2)
+		var n: MeshInstance3D = f.node
+		var shrink: float = 1.0 - clamp((f.t - 1.3) / 0.5, 0.0, 1.0)
+		n.transform = Transform3D(Basis(f.axis, ang) * f.basis.scaled(Vector3.ONE * max(0.001, shrink)), f.pos)
+		if f.t > 1.8:
+			flash_fx("ring", f.pos.x, f.pos.z, 2.0, Vector2(0, 1), Color("#9ccf6a"))
+			n.queue_free()
+			falling.remove_at(i)
+	for i in range(regrowing.size() - 1, -1, -1):
+		var t: TreeObj = regrowing[i]
+		if not t.alive:
+			t.regrow -= dt
+			if t.regrow <= 0:
+				t.alive = true
+				t.hp = t.max_hp
+				t.grow = 0.15
+				stump_mm.set_instance_transform(t.id, Transform3D(Basis().scaled(Vector3.ONE * 0.001), Vector3(t.x, -50, t.z)))
+		else:
+			t.grow = min(1.0, t.grow + dt * 0.5)          # vuelve a crecer de a poco
+			tree_mms[t.sp].set_instance_transform(t.idx, tree_xform(t))
+			if t.grow >= 1.0:
+				regrowing.remove_at(i)
 
 func build_aim_indicator() -> void:
 	aim_root = Node3D.new()
@@ -1451,7 +1742,7 @@ func update_ui() -> void:
 		st = "¡Te quemás!"
 	elif P.hidden:
 		st = "En el pasto: oculto"
-	chips_lbl.text = "%s ✓   %s   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", st]
+	chips_lbl.text = "%s ✓   %s   Madera: %d   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", wood, st]
 	for slot in ACT:
 		var b: Button = skill_btns[slot]
 		var r := int(R()[slot])
@@ -1818,6 +2109,7 @@ func try_basic() -> void:
 			face(mw.x - P.x, mw.y - P.z)
 			swing_fx()
 			play_action("attack", 0.7, 2.6)
+			damage_trees(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6, b.dmg)
 			if oil:
 				element_at(P.x + P.fx * 2, P.z + P.fz * 2, oil, 1.2)
 			P.cds.basic = b.cd
@@ -1826,6 +2118,7 @@ func try_basic() -> void:
 		swing_fx()
 		play_action("attack", 0.7, 2.6)
 		hit_mob(t, b.dmg, {"basic": true, "el": oil})
+		damage_trees(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6, b.dmg)
 	else:
 		var d := Vector2.ZERO
 		if t:
@@ -1866,6 +2159,7 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 	face(d.x, d.y)
 	var opts := {"skill": true, "s": s}
 	var col: Color = weapon.color
+	var tdmg: float = float(s.get("dmg", 0)) * rank_mult(slot)
 	match s.type:
 		"cone":
 			var half: float = deg_to_rad(s.angle) / 2.0
@@ -1880,6 +2174,7 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 				if abs(angle_difference(atan2(vx, vz), a0)) <= half + 0.12:
 					hit_mob(m, s.dmg, opts)
 			flash_fx("sector:%d" % s.angle, P.x, P.z, s.range, d, col)
+			damage_trees(P.x + d.x * s.range * 0.55, P.z + d.y * s.range * 0.55, s.range * 0.5, tdmg)
 			if s.has("el"):
 				for pd in puddles:
 					var L := d2(pd.x, pd.z, P.x, P.z)
@@ -1902,6 +2197,7 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 				if m.dead <= 0 and d2(P.x, P.z, m.x, m.z) < s.radius + m.d.r:
 					hit_mob(m, s.dmg, opts)
 			flash_fx("disc", P.x, P.z, s.radius, d, col)
+			damage_trees(P.x, P.z, s.radius, tdmg)
 		"line":
 			var bl := Blast.new()
 			bl.line = true
@@ -1944,6 +2240,7 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 						m.z += n.y * dd2
 					hit_mob(m, s.dmg, opts)
 			flash_fx("disc", P.x, P.z, s.radius, d, col)
+			damage_trees(P.x, P.z, s.radius, tdmg)
 		"smoke":
 			var zn := Zone.new()
 			zn.x = P.x
@@ -1996,7 +2293,7 @@ func break_camo() -> void:
 	P.camo = false
 
 func start_dash(ex: float, ez: float, dur: float, s: Dictionary) -> void:
-	P.dash = {"sx": P.x, "sz": P.z, "ex": ex, "ez": ez, "t": 0.0, "dur": max(0.08, dur), "s": s, "hit": {}}
+	P.dash = {"sx": P.x, "sz": P.z, "ex": ex, "ez": ez, "t": 0.0, "dur": max(0.08, dur), "s": s, "hit": {}, "trees": {}}
 
 func fire_proj(s: Dictionary, d: Vector2, o: Dictionary) -> void:
 	var p := Proj.new()
@@ -2321,6 +2618,7 @@ func update_game(dt: float) -> void:
 					if m.dead <= 0 and not D.hit.has(m) and d2(P.x, P.z, m.x, m.z) < ds.width / 2.0 + m.d.r:
 						D.hit[m] = true
 						hit_mob(m, ds.dmg, {"skill": true, "s": ds})
+				damage_trees(P.x, P.z, max(0.8, ds.width / 2.0), float(ds.dmg) * rank_mult(slot_of(ds)), D.trees)
 			if k >= 1:
 				P.dash = null
 				if P.queued and P.queued.dead <= 0:
@@ -2344,6 +2642,7 @@ func update_game(dt: float) -> void:
 					if m.dead <= 0 and d2(P.x, P.z, m.x, m.z) < L.s.radius + m.d.r:
 						hit_mob(m, L.s.dmg, {"skill": true, "s": L.s})
 				flash_fx("disc", P.x, P.z, L.s.radius, Vector2(0, 1), weapon.color)
+				damage_trees(P.x, P.z, L.s.radius, float(L.s.dmg) * rank_mult(slot_of(L.s)))
 		else:
 			var ix := 0.0
 			var iy := 0.0
@@ -2389,6 +2688,7 @@ func update_game(dt: float) -> void:
 	update_projs(dt)
 	update_blasts(dt)
 	update_living(dt)
+	update_trees(dt)
 	for i in range(zones.size() - 1, -1, -1):
 		var zn: Zone = zones[i]
 		zn.t -= dt
@@ -2625,6 +2925,7 @@ func update_projs(dt: float) -> void:
 							if o2.dead <= 0 and d2(o2.x, o2.z, m.x, m.z) < p.s.explode:
 								hit_mob(o2, p.s.dmg, oo)
 						flash_fx("disc", m.x, m.z, p.s.explode, Vector2(0, 1), weapon.color)
+						damage_trees(m.x, m.z, p.s.explode, p.s.dmg)
 						if el:
 							element_at(m.x, m.z, el, p.s.explode)
 					else:
@@ -2655,6 +2956,15 @@ func update_projs(dt: float) -> void:
 								c += 1
 					dead = true
 					break
+			if not dead:
+				var tr = tree_at(p.x, p.z)
+				if tr:
+					if p.s.has("explode"):
+						damage_trees(p.x, p.z, p.s.explode, p.s.dmg)
+						flash_fx("disc", p.x, p.z, p.s.explode, Vector2(0, 1), weapon.color)
+					else:
+						damage_trees(tr.x, tr.z, 0.1, p.s.dmg)
+					dead = true
 			if dead and p.hit.is_empty():
 				var el2 = p.o.get("el", p.s.get("el", null))
 				if el2:
@@ -2685,6 +2995,11 @@ func update_blasts(dt: float) -> void:
 				while t <= b.s.range:
 					element_at(b.ox + b.d.x * t, b.oz + b.d.y * t, b.s.el, b.s.width / 2.0)
 					t += 1.5
+			var once := {}
+			var tl := 0.0
+			while tl <= b.s.range:
+				damage_trees(b.ox + b.d.x * tl, b.oz + b.d.y * tl, b.s.width / 2.0, float(b.s.dmg) * rank_mult(slot_of(b.s)), once)
+				tl += 1.5
 		else:
 			var hits := []
 			for m in mobs:
@@ -2703,6 +3018,7 @@ func update_blasts(dt: float) -> void:
 							beam_fx(m.x, m.z, o2.x, o2.z, Color("#f6b26b"))
 							c += 1
 			flash_fx("disc", b.x, b.z, b.r, Vector2(0, 1), weapon.color)
+			damage_trees(b.x, b.z, b.r, float(b.s.dmg) * rank_mult(slot_of(b.s)))
 			if b.s.has("el"):
 				element_at(b.x, b.z, b.s.el, b.r)
 		b.node.queue_free()
