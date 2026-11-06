@@ -81,3 +81,11 @@ Hierro, plata y las vetas extranjeras dependen de la franja de nivel. Espada lar
 - **12 santuarios** con un haz de luz naranja que se ve de lejos. Al tocarlos se vuelven celestes y aparecen en el minimapa: hacé clic en uno (o en una ciudad) para viajar.
 - **Cofres**: uno en cada campamento (se abre cuando no queda ningún monstruo) y 18 escondidos.
 - **Posadas** con corral y caballos en los caminos, **fogatas** de viajeros, un **puente** sobre el río, **carteles** con direcciones, **arcos de piedra** en el campo, **bandadas de pájaros** y **viajeros** que van y vienen por los caminos.
+
+## Menú (I o Tab) — estilo BotW
+- Pestañas: **Armas, Equipo, Gemas, Alquimia, Materiales, Comida**. Cambiás con Q/E o con clic; Esc o I cierra. El juego se pausa.
+- **Equipo**: 6 piezas (cabeza, torso, manos, piernas, pies y accesorio). La pieza es solo apariencia; en cada una engarzás **una gema o una piedra suelta**. Los pies solo llevan Movimiento, y la misma gema no se repite.
+- **Alquimia**: tallás piedras básicas con los minerales que juntaste (el "+" marca las que podés hacer).
+- **Gemas**: combinás piedras en gemas finales con pasiva.
+- A la derecha ves tus stats con lo engarzado; en la demo ya cuentan vida, ataque, magia, defensa, velocidad, enfriamiento y daño a monstruos. Las pasivas todavía no se activan.
+- Empezás con 3 piedras (filo, muralla y paso). Los monstruos sueltan colmillos (para la piedra del cazador). Todo se guarda.

@@ -227,3 +227,33 @@ const GEMAS = [
 	{"name": "Corona invernal", "cat": "Defensa·Magia", "stones": ["muralla", "eco"], "stats": "Defensas, enfriamiento", "passive": "Te congelás: inmune a todo por 2 s (cada 2 min)."},
 	{"name": "Sable del cielo", "cat": "Ataque·Magia", "stones": ["filo", "mira", "arcana"], "stats": "Ataque, poder mágico", "passive": "Tus golpes ejecutan a enemigos con menos del 8% de vida."},
 ]
+
+# --- equipo: 6 piezas de armadura/accesorio; cada una lleva UNA gema o piedra engarzada.
+# La pieza es solo apariencia (se cambia en el guardarropa); el poder está en lo que engarzás.
+# Las botas solo aceptan Movimiento (y Movimiento solo va en las botas), como las botas de MLBB.
+const SLOTS = [
+	{"id": "cabeza", "name": "Cabeza", "piece": "Yelmo de recluta"},
+	{"id": "torso", "name": "Torso", "piece": "Pechera de Lumen"},
+	{"id": "manos", "name": "Manos", "piece": "Guanteletes de cuero"},
+	{"id": "piernas", "name": "Piernas", "piece": "Grebas de viaje"},
+	{"id": "pies", "name": "Pies", "piece": "Botas de camino"},
+	{"id": "accesorio", "name": "Accesorio", "piece": "Amuleto del alba"},
+]
+# lo que suma cada piedra (los números de la demo; % salvo vida)
+const STONE_STATS = {
+	"filo": {"atk": 6}, "mira": {"crit": 5}, "furia": {"aspd": 8},
+	"arcana": {"mag": 6}, "eco": {"cdr": 5}, "vacio": {"mpen": 6},
+	"muralla": {"def": 5}, "vida": {"hp": 8}, "calma": {"mdef": 6},
+	"paso": {"spd": 4}, "viento": {"spd": 8},
+	"cazador": {"pve": 8}, "presa": {"pvels": 5},
+	"guia": {"cdr": 3}, "amparo": {"heal": 10}, "temple": {"tenac": 10},
+}
+const STAT_NAMES = {"hp": "Vida", "atk": "Ataque", "mag": "Magia", "def": "Defensa", "mdef": "Def. mágica", "spd": "Velocidad",
+	"cdr": "Enfriamiento", "crit": "Crítico", "aspd": "Vel. de ataque", "mpen": "Pen. mágica", "pve": "Daño a monstruos",
+	"pvels": "Robo de vida (PvE)", "heal": "Curación", "tenac": "Resist. al control"}
+const MINERAL_COLORS = {"Pedernal": Color("#e6dfcf"), "Cobre": Color("#d9824a"), "Hierro": Color("#b5552e"), "Plata": Color("#dfe6ee"),
+	"Mithril": Color("#7ee7ff"), "Cuarzo solar": Color("#ffe9a8"), "Luminita": Color("#b9f3ff"), "Cristal de hielo": Color("#9fd8ff"),
+	"Ámbar": Color("#f0a030"), "Azufre": Color("#f0cf3a"), "Sal de roca": Color("#fbf7ee"), "Rubí ígneo": Color("#ff4a5e"),
+	"Obsidiana del vacío": Color("#8b5fd6"), "Jade de viento": Color("#5fd68b"), "Perla de marea": Color("#f2eefc"), "Turquesa": Color("#40c8c8")}
+const CAT_COLORS = {"Ataque": Color("#ff7b54"), "Magia": Color("#a371f7"), "Defensa": Color("#58a6ff"), "Movimiento": Color("#7ee787"),
+	"PvE": Color("#f2cc60"), "Soporte": Color("#ff9bd2"), "Ataque·Magia": Color("#ff6fa0"), "Defensa·Magia": Color("#79c0ff")}

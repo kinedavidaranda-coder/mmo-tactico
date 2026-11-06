@@ -218,6 +218,14 @@ var falling: Array = []
 var regrowing: Array = []
 var wood := 0
 var ingredients := {}
+# inventario de gemas: piedras básicas, gemas finales y lo engarzado en cada pieza
+var piedras := {"filo": 1, "muralla": 1, "paso": 1}
+var gemas := {}
+var equipped := {}
+var gear := {}                       # stats sumados de lo engarzado
+var menu
+var running_prev := false
+const Menu = preload("res://scripts/menu.gd")
 var minerals := {}                   # minerales de las vetas (para el Alquimista)
 var ores: Array = []
 var last_col := {}
@@ -327,11 +335,153 @@ func load_progress() -> void:
 		mastery = data.get("mastery", {})
 		ranks_all = data.get("ranks", {})
 		xp_mult = int(data.get("xp_mult", 1))
+		var inv: Dictionary = data.get("inv", {})
+		if not inv.is_empty():
+			piedras = inv.get("piedras", piedras)
+			gemas = inv.get("gemas", {})
+			equipped = inv.get("equipped", {})
+			minerals = inv.get("minerals", {})
+			ingredients = inv.get("ingredients", {})
+	recompute_gear()
 
 func save_progress() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"mastery": mastery, "ranks": ranks_all, "xp_mult": xp_mult}))
+		f.store_string(JSON.stringify({"mastery": mastery, "ranks": ranks_all, "xp_mult": xp_mult,
+			"inv": {"piedras": piedras, "gemas": gemas, "equipped": equipped, "minerals": minerals, "ingredients": ingredients}}))
+
+# ================================================================= GEMAS, PIEDRAS Y EQUIPO
+func gem_def(name: String) -> Dictionary:
+	for g in Data.GEMAS:
+		if g.name == name:
+			return g
+	return {}
+
+func item_cat(it: Dictionary) -> String:
+	if it.kind == "piedra":
+		return Data.PIEDRAS[it.id].cat
+	return gem_def(it.id).get("cat", "")
+
+func item_stats(it: Dictionary) -> Dictionary:
+	if it.kind == "piedra":
+		return Data.STONE_STATS[it.id].duplicate()
+	var out := {}
+	for pid in gem_def(it.id).get("stones", []):
+		for k in Data.STONE_STATS[pid]:
+			out[k] = out.get(k, 0) + Data.STONE_STATS[pid][k]
+	for k in out:
+		out[k] = int(round(out[k] * 1.6))       # la gema rinde más que sus piedras sueltas (y además tiene pasiva)
+	return out
+
+func recompute_gear() -> void:
+	gear = {}
+	for sl in equipped:
+		var it = equipped[sl]
+		if it:
+			var st := item_stats(it)
+			for k in st:
+				gear[k] = gear.get(k, 0) + st[k]
+	if P and weapon:
+		var frac: float = P.hp / max(1.0, P.max_hp)
+		P.max_hp = weapon.hp * (1.0 + gear.get("hp", 0) / 100.0)
+		P.hp = P.max_hp * frac
+		P.speed = weapon.speed * (1.0 + gear.get("spd", 0) / 100.0)
+
+func owned_items() -> Array:
+	var out := []
+	for g in gemas:
+		if int(gemas[g]) > 0:
+			out.append({"kind": "gema", "id": g, "count": int(gemas[g])})
+	for pid in piedras:
+		if int(piedras[pid]) > 0:
+			out.append({"kind": "piedra", "id": pid, "count": int(piedras[pid])})
+	return out
+
+# las botas solo llevan Movimiento, y Movimiento solo va en las botas; la misma gema no se repite
+func fits_slot(it: Dictionary, slot: String) -> bool:
+	var mov := item_cat(it) == "Movimiento"
+	if (slot == "pies") != mov:
+		return false
+	if it.kind == "gema":
+		for sl in equipped:
+			var e = equipped[sl]
+			if e and sl != slot and e.kind == "gema" and e.id == it.id:
+				return false
+	return true
+
+func equip(slot: String, it: Dictionary) -> void:
+	var bag: Dictionary = gemas if it.kind == "gema" else piedras
+	if not fits_slot(it, slot) or int(bag.get(it.id, 0)) < 1:
+		return
+	unequip(slot)
+	bag[it.id] = int(bag.get(it.id, 0)) - 1
+	equipped[slot] = {"kind": it.kind, "id": it.id}
+	recompute_gear()
+	save_progress()
+
+func unequip(slot: String) -> void:
+	var e = equipped.get(slot)
+	if e:
+		var bag: Dictionary = gemas if e.kind == "gema" else piedras
+		bag[e.id] = int(bag.get(e.id, 0)) + 1
+		equipped.erase(slot)
+		recompute_gear()
+		save_progress()
+
+func material_count(mn: String) -> int:
+	return int(minerals.get(mn, 0)) + int(ingredients.get(mn, 0))
+
+func use_material(mn: String) -> void:
+	if int(minerals.get(mn, 0)) > 0:
+		minerals[mn] = int(minerals[mn]) - 1
+	else:
+		ingredients[mn] = int(ingredients.get(mn, 0)) - 1
+
+# Alquimia: tallar una piedra con sus dos minerales
+func can_carve(pid: String) -> bool:
+	for mn in Data.PIEDRAS[pid].recipe:
+		if material_count(mn) < 1:
+			return false
+	return true
+
+func carve(pid: String) -> void:
+	if not can_carve(pid):
+		return
+	for mn in Data.PIEDRAS[pid].recipe:
+		use_material(mn)
+	piedras[pid] = int(piedras.get(pid, 0)) + 1
+	save_progress()
+
+# Joyería: combinar piedras en una gema
+func can_combine(gname: String) -> bool:
+	var need := {}
+	for pid in gem_def(gname).get("stones", []):
+		need[pid] = need.get(pid, 0) + 1
+	for pid in need:
+		if int(piedras.get(pid, 0)) < need[pid]:
+			return false
+	return not need.is_empty()
+
+func combine(gname: String) -> void:
+	if not can_combine(gname):
+		return
+	for pid in gem_def(gname).stones:
+		piedras[pid] = int(piedras[pid]) - 1
+	gemas[gname] = int(gemas.get(gname, 0)) + 1
+	save_progress()
+
+func open_menu() -> void:
+	if menu.visible or weapon == null or weapon.is_empty() or P == null:
+		return
+	running_prev = running
+	running = false
+	aim_slot = ""
+	basic_held = false
+	menu.open()
+
+func menu_closed() -> void:
+	running = running_prev
+	save_progress()
 
 # ================================================================= MAESTRÍA Y PUNTOS
 func style_key(id: String) -> String:
@@ -390,7 +540,7 @@ func rank_mult(slot: String) -> float:
 	return 1.0 + (0.10 if slot == "ult" else 0.08) * (r - 1)
 
 func skill_cd(slot: String) -> float:
-	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1))
+	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1)) * (1.0 - min(0.4, gear.get("cdr", 0) / 100.0))
 
 # ¿el punto está dentro de alguna ciudad (más un margen)?
 func in_city(x: float, z: float, margin := 0.0) -> bool:
@@ -2424,6 +2574,8 @@ func spawn_player() -> void:
 	P.hp = weapon.hp
 	P.max_hp = weapon.hp
 	P.speed = weapon.speed
+	recompute_gear()
+	P.hp = P.max_hp
 	if pnode:
 		pnode.queue_free()
 	pnode = Node3D.new()
@@ -2885,7 +3037,7 @@ func build_ui() -> void:
 	btn_pts = mk_button("Puntos (P)", open_pts)
 	btn_oil = mk_button("Aceite: — (O)", cycle_oil)
 	btn_xp = mk_button("XP ×%d" % xp_mult, cycle_xp)
-	for b in [btn_pts, btn_oil, btn_xp, mk_button("Cámara", reset_cam), mk_button("Clase", show_picker)]:
+	for b in [mk_button("Menú (I)", open_menu), btn_pts, btn_oil, btn_xp, mk_button("Cámara", reset_cam), mk_button("Clase", show_picker)]:
 		top.add_child(b)
 	# botones de habilidades
 	var bar := HBoxContainer.new()
@@ -2912,6 +3064,9 @@ func build_ui() -> void:
 	ui.add_child(toast_lbl)
 	build_pts_panel()
 	build_picker()
+	menu = Menu.new()
+	ui.add_child(menu)
+	menu.setup(self)
 
 func toast(msg: String) -> void:
 	toast_lbl.text = msg
@@ -3212,6 +3367,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not event.pressed or event.echo:
 			return
 		match event.keycode:
+			KEY_I, KEY_TAB:
+				open_menu()
 			KEY_P:
 				open_pts()
 			KEY_O:
@@ -3541,6 +3698,8 @@ func heal(v: float) -> void:
 
 func hit_mob(m: Mob, base, o: Dictionary) -> void:
 	var dmg := float(base)
+	# gemas: ataque o magia según el arma, más el daño a monstruos
+	dmg *= 1.0 + (gear.get("atk", 0) if weapon.phys else gear.get("mag", 0)) / 100.0 + gear.get("pve", 0) / 100.0
 	var special := false
 	var pa := passive()
 	if o.get("basic", false):
@@ -3634,6 +3793,8 @@ func kill(m: Mob) -> void:
 		m.slam = null
 	clear_tele(m)
 	flash_fx("ring", m.x, m.z, m.d.r * 2, Vector2(0, 1), Color("#f2cc60"))
+	if m.d.temper != "timid" and randf() < 0.35:
+		ingredients["Colmillo de monstruo"] = int(ingredients.get("Colmillo de monstruo", 0)) + 1
 	var food: String = m.d.get("food", "")
 	if food != "" and randf() < 0.6:
 		ingredients[food] = int(ingredients.get(food, 0)) + 1
@@ -3669,6 +3830,7 @@ func hurt_player(dmg: float, kind := "") -> void:
 		if P.hits % 4 == 0:
 			add_text(Vector3(P.x, 3, P.z), "Bloqueado", Color("#79c0ff"), 13)
 			return
+	dmg *= 1.0 - min(0.6, gear.get("def", 0) / 100.0)
 	dmg = round(dmg)
 	if P.shield > 0:
 		var a: float = min(P.shield, dmg)
