@@ -154,7 +154,8 @@ const TIERS = [
 	{"name": "Orcos y goblins", "lvl": [35, 45], "color": Color("#ff9b50")},
 	{"name": "Criaturas de las cumbres", "lvl": [45, 60], "color": Color("#f85149")},
 ]
-# --- generado por gen/catalogo.py: catálogo de gemas (uno solo para todo el juego; cualquiera se equipa cualquiera) ---
+# >>> CATÁLOGO DE GEMAS (generado por herramientas/catalogo.py: no editar a mano)
+# --- generado por herramientas/catalogo.py: catálogo de gemas (uno solo para todo el juego; cualquiera se equipa cualquiera) ---
 # El Alquimista talla minerales en piedras básicas; el Joyero combina piedras en gemas finales.
 const PIEDRAS = {
 	"filo": {"name": "Piedra de filo", "cat": "Ataque", "recipe": ["Cobre", "Pedernal"], "effect": "+ataque físico"},
@@ -227,6 +228,7 @@ const GEMAS = [
 	{"name": "Corona invernal", "cat": "Defensa·Magia", "stones": ["muralla", "eco"], "stats": "Defensas, enfriamiento", "passive": "Te congelás: inmune a todo por 2 s (cada 2 min)."},
 	{"name": "Sable del cielo", "cat": "Ataque·Magia", "stones": ["filo", "mira", "arcana"], "stats": "Ataque, poder mágico", "passive": "Tus golpes ejecutan a enemigos con menos del 8% de vida."},
 ]
+# <<< CATÁLOGO DE GEMAS
 
 # --- equipo: 6 piezas de armadura/accesorio; cada una lleva UNA gema o piedra engarzada.
 # La pieza es solo apariencia (se cambia en el guardarropa); el poder está en lo que engarzás.
