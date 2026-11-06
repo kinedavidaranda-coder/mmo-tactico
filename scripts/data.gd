@@ -257,3 +257,71 @@ const MINERAL_COLORS = {"Pedernal": Color("#e6dfcf"), "Cobre": Color("#d9824a"),
 	"Obsidiana del vacío": Color("#8b5fd6"), "Jade de viento": Color("#5fd68b"), "Perla de marea": Color("#f2eefc"), "Turquesa": Color("#40c8c8")}
 const CAT_COLORS = {"Ataque": Color("#ff7b54"), "Magia": Color("#a371f7"), "Defensa": Color("#58a6ff"), "Movimiento": Color("#7ee787"),
 	"PvE": Color("#f2cc60"), "Soporte": Color("#ff9bd2"), "Ataque·Magia": Color("#ff6fa0"), "Defensa·Magia": Color("#79c0ff")}
+
+# --- oficios: cada uno con su herramienta, dónde trabaja y sus acciones.
+# Cuenta normal: elige uno. Cuenta GM: tiene todos.
+const OFICIOS = {
+	"cocinero":    {"name": "Cocinero", "tool": "Olla de campaña", "where": "En una fogata",
+					"desc": "Cocina hasta 5 ingredientes juntos, como en BotW. Los platos curan y dan un efecto (solo PvE)."},
+	"alquimista":  {"name": "Alquimista", "tool": "Mortero de alquimista", "where": "En cualquier lado",
+					"desc": "Talla minerales en piedras básicas y destila aceites elementales y cargas del frasco."},
+	"joyero":      {"name": "Joyero", "tool": "Lupa de joyero", "where": "En cualquier lado",
+					"desc": "Combina piedras en gemas finales. Con la lupa siente las vetas cercanas en el minimapa."},
+	"armero":      {"name": "Armero", "tool": "Martillo de forja", "where": "En la forja de una ciudad",
+					"desc": "Forja apariencias de armadura y accesorio (la pieza cambia de look, la gema queda)."},
+	"criador":     {"name": "Criador", "tool": "Lazo y silbato", "where": "En el campo",
+					"desc": "Doma caballos salvajes con verduras y los llama cuando quiere montar (H)."},
+	"constructor": {"name": "Constructor", "tool": "Caja de herramientas", "where": "En cualquier lado",
+					"desc": "Construye con madera y piedra: fogatas para cocinar, empalizadas para cubrirse."},
+}
+
+# ingredientes: tipo, cuánto curan y si dan efecto al cocinarlos
+const INGREDIENTES = {
+	"Hierba dulce": {"type": "hierba", "heal": 20},
+	"Hierba de vida": {"type": "hierba", "heal": 60, "fx": "curacion"},
+	"Bayas silvestres": {"type": "fruta", "heal": 20, "fx": "velocidad"},
+	"Hongo del bosque": {"type": "hongo", "heal": 30},
+	"Hongo luminoso": {"type": "hongo", "heal": 25, "fx": "enfriamiento"},
+	"Zanahoria silvestre": {"type": "verdura", "heal": 30, "fx": "velocidad"},
+	"Calabaza": {"type": "verdura", "heal": 40, "fx": "defensa"},
+	"Trigo silvestre": {"type": "grano", "heal": 25},
+	"Fruta de cactus": {"type": "fruta", "heal": 25},
+	"Pimiento ardiente": {"type": "verdura", "heal": 20, "fx": "ataque"},
+	"Menta glacial": {"type": "hierba", "heal": 20, "fx": "vigor"},
+	"Flor de escarcha": {"type": "hierba", "heal": 15},
+	"Coco": {"type": "fruta", "heal": 35},
+	"Alga del lago": {"type": "marisco", "heal": 25},
+	"Carne tierna": {"type": "carne", "heal": 45},
+	"Panceta de jabalí": {"type": "carne", "heal": 60},
+	"Zarpa de oso": {"type": "carne", "heal": 90, "fx": "ataque"},
+	"Hígado de ogro": {"type": "carne", "heal": 80, "fx": "defensa"},
+	"Musgo de gólem": {"type": "hierba", "heal": 40, "fx": "defensa"},
+	"Grasa de troll": {"type": "carne", "heal": 70, "fx": "vigor"},
+}
+const FX_NAMES = {"curacion": "Curativo", "velocidad": "Veloz", "enfriamiento": "Luminoso", "defensa": "Fuerte",
+	"ataque": "Picante", "vigor": "Revitalizante"}
+const FX_DESC = {"curacion": "cura el doble", "velocidad": "+15% de velocidad", "enfriamiento": "−15% de enfriamiento",
+	"defensa": "+15% de defensa", "ataque": "+15% de ataque", "vigor": "regenerás 1% de vida por segundo"}
+
+# alquimia: aceites y frascos
+const DESTILADOS = {
+	"Aceite de fuego": {"recipe": ["Azufre", "Ámbar"], "oil": "fuego"},
+	"Aceite de rayo": {"recipe": ["Luminita", "Cuarzo solar"], "oil": "rayo"},
+	"Carga del frasco": {"recipe": ["Hierba de vida", "Hierba de vida"], "oil": ""},
+}
+# armero: apariencias (una por pieza y material)
+const APARIENCIAS = [
+	{"slot": "cabeza", "name": "Yelmo de hierro", "recipe": ["Hierro", "Hierro", "Madera"]},
+	{"slot": "torso", "name": "Coraza de hierro", "recipe": ["Hierro", "Hierro", "Hierro", "Madera"]},
+	{"slot": "manos", "name": "Guanteletes de hierro", "recipe": ["Hierro", "Cobre"]},
+	{"slot": "piernas", "name": "Grebas de hierro", "recipe": ["Hierro", "Hierro", "Madera"]},
+	{"slot": "pies", "name": "Botas de hierro", "recipe": ["Hierro", "Cobre"]},
+	{"slot": "accesorio", "name": "Amuleto de plata", "recipe": ["Plata", "Cuarzo solar"]},
+	{"slot": "torso", "name": "Coraza solar", "recipe": ["Plata", "Plata", "Cuarzo solar", "Cuarzo solar"]},
+	{"slot": "cabeza", "name": "Corona de escarcha", "recipe": ["Plata", "Cristal de hielo"]},
+]
+# constructor
+const CONSTRUCCIONES = {
+	"Fogata": {"recipe": ["Madera", "Madera", "Madera", "Pedernal"], "desc": "Para cocinar donde quieras."},
+	"Empalizada": {"recipe": ["Madera", "Madera", "Madera", "Madera"], "desc": "Un tramo de cerco delante tuyo: te cubre (los dashes la atraviesan)."},
+}

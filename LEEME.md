@@ -83,9 +83,21 @@ Hierro, plata y las vetas extranjeras dependen de la franja de nivel. Espada lar
 - **Posadas** con corral y caballos en los caminos, **fogatas** de viajeros, un **puente** sobre el río, **carteles** con direcciones, **arcos de piedra** en el campo, **bandadas de pájaros** y **viajeros** que van y vienen por los caminos.
 
 ## Menú (I o Tab) — estilo BotW
-- Pestañas: **Armas, Equipo, Gemas, Alquimia, Materiales, Comida**. Cambiás con Q/E o con clic; Esc o I cierra. El juego se pausa.
+- Pestañas: **Armas, Equipo, Gemas, Oficio, Materiales, Comida**. Cambiás con Q/E o con clic; Esc o I cierra. El juego se pausa.
 - **Equipo**: 6 piezas (cabeza, torso, manos, piernas, pies y accesorio). La pieza es solo apariencia; en cada una engarzás **una gema o una piedra suelta**. Los pies solo llevan Movimiento, y la misma gema no se repite.
-- **Alquimia**: tallás piedras básicas con los minerales que juntaste (el "+" marca las que podés hacer).
-- **Gemas**: combinás piedras en gemas finales con pasiva.
+- **Gemas**: tus gemas y piedras para engarzar.
 - A la derecha ves tus stats con lo engarzado; en la demo ya cuentan vida, ataque, magia, defensa, velocidad, enfriamiento y daño a monstruos. Las pasivas todavía no se activan.
 - Empezás con 3 piedras (filo, muralla y paso). Los monstruos sueltan colmillos (para la piedra del cazador). Todo se guarda.
+
+## Oficios (pestaña Oficio)
+Esta cuenta es **GM** y tiene los 6 oficios. Con el botón "Cuenta GM ✓" probás cómo es una cuenta normal, que elige uno solo.
+| Oficio | Herramienta | Dónde | Qué hace |
+|---|---|---|---|
+| Cocinero | Olla de campaña | En una fogata (G) | Cocina hasta 5 ingredientes como en BotW: el plato cura y da un efecto (picante, fuerte, veloz, luminoso, revitalizante). Dos efectos distintos se anulan. |
+| Alquimista | Mortero | En cualquier lado | Talla piedras básicas con minerales y destila aceite de fuego, aceite de rayo y cargas del frasco. |
+| Joyero | Lupa | En cualquier lado | Combina piedras en gemas. La lupa muestra las vetas cercanas en el minimapa. |
+| Armero | Martillo de forja | En la forja de una ciudad (G) | Forja apariencias de armadura; se cambian en Equipo sin sacar la gema. |
+| Criador | Lazo y silbato | En el campo | Doma caballos salvajes de las praderas con zanahoria, calabaza o bayas (G). H para montar: corrés 60% más. |
+| Constructor | Caja de herramientas | Fuera de las ciudades | Construye fogatas (para cocinar donde quieras) y empalizadas, con madera de los árboles que tirás. |
+
+Cualquiera puede comer crudo o **asar** un ingrediente en una fogata (pestaña Comida).

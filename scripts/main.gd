@@ -225,6 +225,21 @@ var equipped := {}
 var gear := {}                       # stats sumados de lo engarzado
 var menu
 var running_prev := false
+# oficios
+var account_gm := true               # esta cuenta es GM: tiene todos los oficios
+var prof := ""                       # oficio elegido (cuenta normal)
+var platos := {}                     # nombre -> {"n", "heal", "fx", "dur"}
+var destilados := {}
+var looks := {}                      # pieza -> apariencia elegida
+var wardrobe: Array = []             # apariencias forjadas
+var horses_owned: Array = []
+var wild_horses: Array = []
+var mounted := false
+var mount_node: Node3D
+var food_fx := ""
+var food_t := 0.0
+var sense_ores := false
+var built_fires: Array = []
 const Menu = preload("res://scripts/menu.gd")
 var minerals := {}                   # minerales de las vetas (para el Alquimista)
 var ores: Array = []
@@ -342,13 +357,23 @@ func load_progress() -> void:
 			equipped = inv.get("equipped", {})
 			minerals = inv.get("minerals", {})
 			ingredients = inv.get("ingredients", {})
+			platos = inv.get("platos", {})
+			destilados = inv.get("destilados", {})
+			looks = inv.get("looks", {})
+			wardrobe = inv.get("wardrobe", [])
+			horses_owned = inv.get("horses", [])
+			wood = int(inv.get("wood", 0))
+		account_gm = bool(data.get("gm", true))
+		prof = str(data.get("prof", ""))
 	recompute_gear()
 
 func save_progress() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"mastery": mastery, "ranks": ranks_all, "xp_mult": xp_mult,
-			"inv": {"piedras": piedras, "gemas": gemas, "equipped": equipped, "minerals": minerals, "ingredients": ingredients}}))
+			"gm": account_gm, "prof": prof,
+			"inv": {"piedras": piedras, "gemas": gemas, "equipped": equipped, "minerals": minerals, "ingredients": ingredients,
+				"platos": platos, "destilados": destilados, "looks": looks, "wardrobe": wardrobe, "horses": horses_owned, "wood": wood}}))
 
 # ================================================================= GEMAS, PIEDRAS Y EQUIPO
 func gem_def(name: String) -> Dictionary:
@@ -429,20 +454,34 @@ func unequip(slot: String) -> void:
 		save_progress()
 
 func material_count(mn: String) -> int:
+	if mn == "Madera":
+		return wood
 	return int(minerals.get(mn, 0)) + int(ingredients.get(mn, 0))
 
+func has_all(recipe: Array) -> bool:
+	var need := {}
+	for mn in recipe:
+		need[mn] = need.get(mn, 0) + 1
+	for mn in need:
+		if material_count(mn) < need[mn]:
+			return false
+	return true
+
+func use_all(recipe: Array) -> void:
+	for mn in recipe:
+		use_material(mn)
+
 func use_material(mn: String) -> void:
-	if int(minerals.get(mn, 0)) > 0:
+	if mn == "Madera":
+		wood -= 1
+	elif int(minerals.get(mn, 0)) > 0:
 		minerals[mn] = int(minerals[mn]) - 1
 	else:
 		ingredients[mn] = int(ingredients.get(mn, 0)) - 1
 
 # Alquimia: tallar una piedra con sus dos minerales
 func can_carve(pid: String) -> bool:
-	for mn in Data.PIEDRAS[pid].recipe:
-		if material_count(mn) < 1:
-			return false
-	return true
+	return has_all(Data.PIEDRAS[pid].recipe)
 
 func carve(pid: String) -> void:
 	if not can_carve(pid):
@@ -469,6 +508,272 @@ func combine(gname: String) -> void:
 		piedras[pid] = int(piedras[pid]) - 1
 	gemas[gname] = int(gemas.get(gname, 0)) + 1
 	save_progress()
+
+# ================================================================= OFICIOS
+func has_prof(id: String) -> bool:
+	return account_gm or prof == id
+
+func near_fire() -> bool:
+	for po in pois:
+		if String(po.name).begins_with("Fogata") and d2(P.x, P.z, po.x, po.z) < 4.5:
+			return true
+	return false
+
+func in_forge() -> bool:
+	return in_city(P.x, P.z)
+
+# cocina estilo BotW: hasta 5 ingredientes; el tipo que más hay le pone nombre,
+# los efectos se suman (dos efectos distintos se anulan) y la curación es la suma
+func cook_preview(pot: Array) -> Dictionary:
+	if pot.is_empty():
+		return {}
+	var hl := 0
+	var types := {}
+	var fxs := {}
+	for n in pot:
+		var ing: Dictionary = Data.INGREDIENTES.get(n, {"type": "hierba", "heal": 15})
+		hl += int(ing.heal)
+		types[ing.type] = types.get(ing.type, 0) + 1
+		if ing.has("fx"):
+			fxs[ing.fx] = fxs.get(ing.fx, 0) + 1
+	var main_t := ""
+	var best := 0
+	for t in types:
+		if types[t] > best:
+			best = types[t]
+			main_t = t
+	var names := {"carne": "Brocheta de carne", "verdura": "Salteado de verduras", "hongo": "Guiso de hongos", "fruta": "Compota de frutas",
+		"hierba": "Infusión de hierbas", "grano": "Pan de campo", "marisco": "Sopa del lago"}
+	var base: String = names.get(main_t, "Plato del aventurero")
+	if types.size() >= 3:
+		base = "Plato del aventurero"
+	if types.has("carne") and (types.has("verdura") or types.has("hongo")) and types.size() == 2:
+		base = "Guiso de carne"
+	var fx := ""
+	var dur := 0.0
+	if fxs.size() == 1:
+		fx = fxs.keys()[0]
+		dur = 60.0 * fxs[fx]
+		if fx == "curacion":
+			hl *= 2
+	var nm := base if fx == "" else "%s %s" % [base, String(Data.FX_NAMES[fx]).to_lower()]
+	return {"name": nm, "heal": hl * 2, "fx": fx, "dur": dur, "fail": fxs.size() > 1}
+
+func cook(pot: Array) -> String:
+	if not near_fire() or pot.is_empty() or not has_prof("cocinero"):
+		return ""
+	var pv := cook_preview(pot)
+	for n in pot:
+		use_material(n)
+	var d: Dictionary = platos.get(pv.name, {"n": 0, "heal": pv.heal, "fx": pv.fx, "dur": pv.dur})
+	d.n = int(d.n) + 1
+	platos[pv.name] = d
+	flash_fx("ring", P.x, P.z, 2.0, Vector2(0, 1), Color("#ff9b50"))
+	save_progress()
+	return pv.name
+
+# asar en la fogata: cualquiera puede, con un solo ingrediente
+func roast(n: String) -> void:
+	if not near_fire() or material_count(n) < 1:
+		return
+	use_material(n)
+	var ing: Dictionary = Data.INGREDIENTES.get(n, {"heal": 15})
+	var nm := n + " asado"
+	var d: Dictionary = platos.get(nm, {"n": 0, "heal": int(ing.heal * 1.5), "fx": "", "dur": 0.0})
+	d.n = int(d.n) + 1
+	platos[nm] = d
+	save_progress()
+
+func eat(nm: String, raw := false) -> void:
+	if raw:
+		if material_count(nm) < 1:
+			return
+		use_material(nm)
+		heal(float(Data.INGREDIENTES.get(nm, {"heal": 10}).heal))
+	else:
+		var d: Dictionary = platos.get(nm, {})
+		if d.is_empty() or int(d.n) < 1:
+			return
+		d.n = int(d.n) - 1
+		heal(float(d.heal))
+		if d.fx != "" and d.fx != "curacion":
+			food_fx = d.fx
+			food_t = float(d.dur)
+			toast("%s: %s por %d s" % [Data.FX_NAMES[d.fx], Data.FX_DESC[d.fx], int(d.dur)])
+		if int(d.n) <= 0:
+			platos.erase(nm)
+	save_progress()
+
+func distill(nm: String) -> void:
+	var rec: Array = Data.DESTILADOS[nm].recipe
+	if not has_prof("alquimista") or not has_all(rec):
+		return
+	use_all(rec)
+	destilados[nm] = int(destilados.get(nm, 0)) + 1
+	save_progress()
+
+func use_distilled(nm: String) -> void:
+	if int(destilados.get(nm, 0)) < 1:
+		return
+	destilados[nm] = int(destilados[nm]) - 1
+	var el: String = Data.DESTILADOS[nm].oil
+	if el != "":
+		oil = el
+		btn_oil.text = "Aceite: " + ("🔥 Fuego" if oil == "fuego" else "⚡ Rayo") + " (O)"
+		toast("Untaste el arma con " + nm.to_lower())
+	else:
+		heal(P.max_hp * 0.4)
+		toast("Frasco: +40% de vida")
+	save_progress()
+
+func forge(i: int) -> void:
+	var ap: Dictionary = Data.APARIENCIAS[i]
+	if not has_prof("armero") or not in_forge() or not has_all(ap.recipe) or ap.name in wardrobe:
+		return
+	use_all(ap.recipe)
+	wardrobe.append(ap.name)
+	looks[ap.slot] = ap.name
+	save_progress()
+
+func piece_name(slot: String) -> String:
+	if looks.has(slot):
+		return looks[slot]
+	for sl in Data.SLOTS:
+		if sl.id == slot:
+			return sl.piece
+	return ""
+
+func cycle_look(slot: String) -> void:
+	var opts := []
+	for sl in Data.SLOTS:
+		if sl.id == slot:
+			opts.append(sl.piece)
+	for ap in Data.APARIENCIAS:
+		if ap.slot == slot and ap.name in wardrobe:
+			opts.append(ap.name)
+	var i: int = opts.find(piece_name(slot))
+	var nxt: String = opts[(i + 1) % opts.size()]
+	if nxt == opts[0]:
+		looks.erase(slot)
+	else:
+		looks[slot] = nxt
+	save_progress()
+
+func build_thing(nm: String) -> void:
+	var rec: Array = Data.CONSTRUCCIONES[nm].recipe
+	if not has_prof("constructor") or not has_all(rec) or in_city(P.x, P.z):
+		return
+	use_all(rec)
+	var q := Vector2(P.x + P.fx * 3.0, P.z + P.fz * 3.0)
+	if nm == "Fogata":
+		var y := H(q.x, q.y)
+		for k in 6:
+			var a := TAU * k / 6.0
+			sphere(0.22, Color("#7d776c"), Vector3(q.x + cos(a) * 0.8, y + 0.1, q.y + sin(a) * 0.8), world)
+		var fl := sphere(0.4, Color("#ff9b50"), Vector3(q.x, y + 0.35, q.y), world)
+		fl.material_override = glow_mat(Color("#ff8a3a"), 1.8)
+		pois.append({"name": "Fogata (se puede cocinar)", "x": q.x, "z": q.y, "r": 10.0})
+	else:
+		var side := Vector2(-P.fz, P.fx)
+		var rr := RandomNumberGenerator.new()
+		fence_xf.clear()
+		fence_col.clear()
+		fence_run(q - side * 3.0, q + side * 3.0, "empalizada", rr)
+		finish_fences()
+	toast("Construiste: " + nm)
+	save_progress()
+
+# caballos salvajes para el Criador
+func build_wild_horses() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 777
+	var made := 0
+	var tries := 0
+	var cols = [[Color("#7a4a2a"), "Caballo bayo"], [Color("#e8e0d0"), "Caballo blanco"], [Color("#2e2620"), "Caballo negro"], [Color("#b07a4a"), "Caballo pinto"]]
+	while made < 8 and tries < 3000:
+		tries += 1
+		var x := r.randf_range(-200, 300)
+		var z := r.randf_range(-60, 320)
+		if not Terrain.biome_at(x, z) in ["pradera", "campos"] or not site_ok(x, z, 3.0):
+			continue
+		var c: Array = cols[made % cols.size()]
+		var nd := make_horse(c[0])
+		nd.position = Vector3(x, H(x, z), z)
+		wild_horses.append({"name": c[1], "col": c[0], "node": nd, "x": x, "z": z, "sx": x, "sz": z, "t": 0.0, "tx": x, "tz": z})
+		made += 1
+
+func update_wild_horses(dt: float) -> void:
+	for h in wild_horses:
+		h.t -= dt
+		if h.t <= 0:
+			h.t = randf_range(3.0, 8.0)
+			h.tx = h.sx + randf_range(-10, 10)
+			h.tz = h.sz + randf_range(-10, 10)
+		var d := Vector2(h.tx - h.x, h.tz - h.z)
+		if d.length() > 0.5:
+			var n := d.normalized()
+			var spd := 1.2
+			if not blocked(h.x + n.x * spd * dt, h.z + n.y * spd * dt, 0.8):
+				h.x += n.x * spd * dt
+				h.z += n.y * spd * dt
+			h.node.rotation.y = atan2(n.x, n.y)
+		h.node.position = Vector3(h.x, H(h.x, h.z), h.z)
+
+func nearest_wild_horse() -> Dictionary:
+	for h in wild_horses:
+		if d2(P.x, P.z, h.x, h.z) < 3.5:
+			return h
+	return {}
+
+func tame(h: Dictionary) -> void:
+	if not has_prof("criador"):
+		toast("Necesitás el oficio de Criador para domar caballos")
+		return
+	var food := ""
+	for f in ["Zanahoria silvestre", "Calabaza", "Bayas silvestres"]:
+		if material_count(f) > 0:
+			food = f
+			break
+	if food == "":
+		toast("Necesitás una zanahoria, una calabaza o bayas para ganarte su confianza")
+		return
+	use_material(food)
+	h.node.queue_free()
+	wild_horses.erase(h)
+	horses_owned.append({"name": h.name, "col": h.col.to_html()})
+	add_text(Vector3(P.x, 3, P.z), "¡Domaste un %s!" % String(h.name).to_lower(), Color("#7ee787"), 16)
+	toast("Tu caballo está en el establo: llamalo con H")
+	save_progress()
+
+func toggle_mount() -> void:
+	if mounted:
+		mounted = false
+		if mount_node:
+			mount_node.queue_free()
+			mount_node = null
+		return
+	if horses_owned.is_empty():
+		toast("No tenés caballos (el Criador los doma con verduras)")
+		return
+	mounted = true
+	mount_node = make_horse(Color(horses_owned[0].col))
+	mount_node.scale = Vector3.ONE * 0.9
+	toast("Montado (solo PvE; en PvP la montura no hace daño)")
+
+func interact() -> void:
+	if not running or P == null:
+		return
+	var h := nearest_wild_horse()
+	if not h.is_empty():
+		tame(h)
+		return
+	if near_fire():
+		open_menu()
+		menu.open_prof("cocinero")
+		return
+	if in_forge() and has_prof("armero"):
+		open_menu()
+		menu.open_prof("armero")
 
 func open_menu() -> void:
 	if menu.visible or weapon == null or weapon.is_empty() or P == null:
@@ -540,7 +845,7 @@ func rank_mult(slot: String) -> float:
 	return 1.0 + (0.10 if slot == "ult" else 0.08) * (r - 1)
 
 func skill_cd(slot: String) -> float:
-	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1)) * (1.0 - min(0.4, gear.get("cdr", 0) / 100.0))
+	return float(weapon[slot].cd) * (1.0 - 0.04 * max(0, int(R()[slot]) - 1)) * (1.0 - min(0.4, gear.get("cdr", 0) / 100.0 + (0.15 if food_fx == "enfriamiento" else 0.0)))
 
 # ¿el punto está dentro de alguna ciudad (más un margen)?
 func in_city(x: float, z: float, margin := 0.0) -> bool:
@@ -745,6 +1050,7 @@ func build_world() -> void:
 	build_ores()
 	build_flora()
 	build_points_of_interest()
+	build_wild_horses()
 	# minimapa
 	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
 	# línea de apuntado hacia el cursor
@@ -1707,18 +2013,9 @@ func build_points_of_interest() -> void:
 				fence_run(c4[k], c4[k + 1], "rustico", r)
 		for k in 2:
 			var hp := cor + fx * (k * 5.0 - 2.5)
-			var horse := Node3D.new()
+			var horse := make_horse([Color("#7a4a2a"), Color("#e8e0d0"), Color("#2e2620")][r.randi() % 3])
 			horse.position = Vector3(hp.x, H(hp.x, hp.y), hp.y)
 			horse.rotation.y = r.randf() * TAU
-			world.add_child(horse)
-			var hc: Color = [Color("#7a4a2a"), Color("#e8e0d0"), Color("#2e2620")][r.randi() % 3]
-			box(Vector3(0.8, 0.9, 2.2), hc, Vector3(0, 1.5, 0), horse)
-			var neck := box(Vector3(0.45, 1.2, 0.5), hc, Vector3(0, 2.2, 1.0), horse)
-			neck.rotation.x = 0.5
-			box(Vector3(0.4, 0.45, 0.8), hc.darkened(0.1), Vector3(0, 2.75, 1.45), horse)
-			for lx in [-0.3, 0.3]:
-				for lz in [-0.85, 0.85]:
-					box(Vector3(0.18, 1.1, 0.18), hc.darkened(0.25), Vector3(lx, 0.55, lz), horse)
 		pois.append({"name": inn[1], "x": q.x, "z": q.y, "r": 30.0})
 	# puentes donde los caminos cruzan el río
 	for cxp in Terrain.CROSSINGS:
@@ -1850,6 +2147,19 @@ func build_points_of_interest() -> void:
 		if i == 0:
 			box(Vector3(0.8, 0.9, 0.5), Color("#6b4f33"), Vector3(0, 1.2, -0.45), nd)
 		travelers.append({"name": who[i][0], "road": road, "seg": 1, "t": 0.2, "dir": 1, "node": nd, "x": 0.0, "z": 0.0})
+
+func make_horse(hc: Color) -> Node3D:
+	var horse := Node3D.new()
+	world.add_child(horse)
+	box(Vector3(0.8, 0.9, 2.2), hc, Vector3(0, 1.5, 0), horse)
+	var neck := box(Vector3(0.45, 1.2, 0.5), hc, Vector3(0, 2.2, 1.0), horse)
+	neck.rotation.x = 0.5
+	box(Vector3(0.4, 0.45, 0.8), hc.darkened(0.1), Vector3(0, 2.75, 1.45), horse)
+	box(Vector3(0.12, 0.9, 0.5), hc.darkened(0.35), Vector3(0, 2.4, 0.75), horse)        # crin
+	for lx in [-0.3, 0.3]:
+		for lz in [-0.85, 0.85]:
+			box(Vector3(0.18, 1.1, 0.18), hc.darkened(0.25), Vector3(lx, 0.55, lz), horse)
+	return horse
 
 func add_chest(q: Vector2, tier: int, camp: int) -> void:
 	var y := H(q.x, q.y)
@@ -3369,6 +3679,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_I, KEY_TAB:
 				open_menu()
+			KEY_G:
+				interact()
+			KEY_H:
+				toggle_mount()
 			KEY_P:
 				open_pts()
 			KEY_O:
@@ -3699,7 +4013,7 @@ func heal(v: float) -> void:
 func hit_mob(m: Mob, base, o: Dictionary) -> void:
 	var dmg := float(base)
 	# gemas: ataque o magia según el arma, más el daño a monstruos
-	dmg *= 1.0 + (gear.get("atk", 0) if weapon.phys else gear.get("mag", 0)) / 100.0 + gear.get("pve", 0) / 100.0
+	dmg *= 1.0 + (gear.get("atk", 0) if weapon.phys else gear.get("mag", 0)) / 100.0 + gear.get("pve", 0) / 100.0 + (0.15 if food_fx == "ataque" else 0.0)
 	var special := false
 	var pa := passive()
 	if o.get("basic", false):
@@ -3830,7 +4144,7 @@ func hurt_player(dmg: float, kind := "") -> void:
 		if P.hits % 4 == 0:
 			add_text(Vector3(P.x, 3, P.z), "Bloqueado", Color("#79c0ff"), 13)
 			return
-	dmg *= 1.0 - min(0.6, gear.get("def", 0) / 100.0)
+	dmg *= 1.0 - min(0.6, gear.get("def", 0) / 100.0 + (0.15 if food_fx == "defensa" else 0.0))
 	dmg = round(dmg)
 	if P.shield > 0:
 		var a: float = min(P.shield, dmg)
@@ -4079,7 +4393,7 @@ func update_game(dt: float) -> void:
 				var f := cam_forward()
 				var r := Vector2(-f.y, f.x)
 				var w := (r * ix + f * (-iy)).normalized()
-				var sp: float = P.speed * (1.4 if P.speed_t > 0 else 1.0) * (1.1 if P.camo else 1.0)
+				var sp: float = P.speed * (1.4 if P.speed_t > 0 else 1.0) * (1.1 if P.camo else 1.0) * (1.15 if food_fx == "velocidad" else 1.0) * (1.6 if mounted else 1.0)
 				var nx: float = clamp(P.x + w.x * sp * dt, -B, B)
 				var nz: float = clamp(P.z + w.y * sp * dt, -B, B)
 				if can_walk(P.x, P.z, nx, nz):
@@ -4103,6 +4417,13 @@ func update_game(dt: float) -> void:
 	update_ores(dt)
 	update_world_life(dt)
 	update_flora(dt)
+	update_wild_horses(dt)
+	if food_t > 0:
+		food_t -= dt
+		if food_fx == "vigor":
+			heal(P.max_hp * 0.01 * dt)
+		if food_t <= 0:
+			food_fx = ""
 	for i in range(zones.size() - 1, -1, -1):
 		var zn: Zone = zones[i]
 		zn.t -= dt
@@ -4647,7 +4968,10 @@ func render_frame() -> void:
 		camera.position = Vector3(30, 30, 30)
 		camera.look_at(Vector3.ZERO)
 		return
-	pnode.position = Vector3(P.x, H(P.x, P.z) + P.y, P.z)
+	pnode.position = Vector3(P.x, H(P.x, P.z) + P.y + (1.3 if mounted else 0.0), P.z)
+	if mounted and mount_node:
+		mount_node.position = Vector3(P.x, H(P.x, P.z), P.z)
+		mount_node.rotation.y = atan2(P.fx, P.fz)
 	pnode.rotation.y = atan2(P.fx, P.fz)
 	pnode.visible = P.dead <= 0 or hero_model != null
 	if running:
@@ -4756,6 +5080,18 @@ func draw_overlay() -> void:
 			tag += "◆"
 		if tag != "":
 			overlay.draw_string(font, Vector2(p.x - 50, p.y - 20), tag, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color("#f2cc60"))
+	if P and running:
+		var hint := ""
+		if not nearest_wild_horse().is_empty():
+			hint = "G: domar caballo" + ("" if has_prof("criador") else " (necesita Criador)")
+		elif near_fire():
+			hint = "G: cocinar en la fogata"
+		elif in_forge() and has_prof("armero"):
+			hint = "G: usar la forja"
+		if hint != "":
+			var hp3 := camera.unproject_position(Vector3(P.x, H(P.x, P.z) + 3.4, P.z))
+			overlay.draw_string_outline(font, hp3 + Vector2(-110, 0), hint, HORIZONTAL_ALIGNMENT_CENTER, 220, 14, 4, Color(0, 0, 0, 0.85))
+			overlay.draw_string(font, hp3 + Vector2(-110, 0), hint, HORIZONTAL_ALIGNMENT_CENTER, 220, 14, Color("#f2cc60"))
 	var named := []
 	for po in pois:
 		named.append([po.name, po.x, po.z, po.r, 4.0, Color("#f0e6d2")])
@@ -4810,6 +5146,11 @@ func draw_minimap(font: Font) -> void:
 		return o + Vector2((x + Terrain.HALF) / Terrain.SIZE, (z + Terrain.HALF) / Terrain.SIZE) * sz
 	for cp in camps:
 		overlay.draw_circle(to_map.call(cp.pos.x, cp.pos.y), 2.5, Data.TIERS[cp.tier].color)
+	if sense_ores and P:
+		for ov in ores:
+			if ov.regrow <= 0 and d2(P.x, P.z, ov.x, ov.z) < 90.0:
+				var op: Vector2 = to_map.call(ov.x, ov.z)
+				overlay.draw_rect(Rect2(op - Vector2(2, 2), Vector2(4, 4)), Data.ORES[ov.kind].gem)
 	for sh in shrines:
 		if sh.found:
 			var sp: Vector2 = to_map.call(sh.x, sh.z)

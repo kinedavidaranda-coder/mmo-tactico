@@ -8,7 +8,7 @@ const GOLD := Color("#f2cc60")
 const BG := Color(0.03, 0.05, 0.08, 0.95)
 const SLOT_BG := Color(0.1, 0.12, 0.15, 0.85)
 
-const TABS = ["Armas", "Equipo", "Gemas", "Alquimia", "Materiales", "Comida"]
+const TABS = ["Armas", "Equipo", "Gemas", "Oficio", "Materiales", "Comida"]
 
 var m                      # el script principal (main.gd)
 var tab := 1
@@ -25,6 +25,9 @@ var preview_vp: SubViewport
 var preview_root: Node3D
 var preview_anim: AnimationPlayer
 var picking_slot := ""     # si estás eligiendo qué engarzar en una pieza
+var prof_view := ""        # oficio que se muestra en la pestaña Oficio
+var pot: Array = []        # olla del Cocinero (hasta 5 ingredientes)
+var prof_bar: HBoxContainer
 
 # ----------------------------------------------------------------- íconos dibujados
 class Icon extends Control:
@@ -64,6 +67,27 @@ class Icon extends Control:
 				if col.a > 0:
 					var g := PackedVector2Array([c + Vector2(0, -r * 0.6), c + Vector2(r * 0.4, 0), c + Vector2(0, r * 0.6), c + Vector2(-r * 0.4, 0)])
 					draw_colored_polygon(g, col)
+			"plato":
+				draw_circle(c + Vector2(0, -r * 0.1), r * 0.85, col)
+				draw_rect(Rect2(c + Vector2(-r, 0), Vector2(r * 2, r * 0.7)), Color("#6b4f33"))
+				draw_circle(c + Vector2(-r * 0.3, -r * 0.3), r * 0.25, col.lightened(0.3))
+			"frasco":
+				draw_rect(Rect2(c + Vector2(-r * 0.2, -r * 1.1), Vector2(r * 0.4, r * 0.5)), Color("#d9cfb8"))
+				draw_circle(c + Vector2(0, r * 0.25), r * 0.75, col)
+				draw_circle(c + Vector2(-r * 0.25, 0), r * 0.18, Color(1, 1, 1, 0.6))
+			"herramienta":
+				draw_line(c + Vector2(-r, r), c + Vector2(r * 0.4, -r * 0.4), Color("#8a6a45"), 5.0)
+				draw_rect(Rect2(c + Vector2(r * 0.1, -r * 1.0), Vector2(r * 0.9, r * 0.6)), col)
+			"caballo":
+				draw_circle(c + Vector2(0, r * 0.1), r * 0.7, col)
+				draw_rect(Rect2(c + Vector2(r * 0.2, -r * 1.0), Vector2(r * 0.5, r * 0.9)), col)
+				draw_rect(Rect2(c + Vector2(r * 0.1, -r * 1.0), Vector2(r * 0.12, r * 0.9)), col.darkened(0.4))
+			"oficio":
+				var pts := PackedVector2Array()
+				for k in 10:
+					var a := TAU * k / 10.0 - PI / 2
+					pts.append(c + Vector2(cos(a), sin(a)) * (r * 1.1 if k % 2 == 0 else r * 0.5))
+				draw_colored_polygon(pts, col)
 			"arma":
 				draw_line(c + Vector2(-r, r), c + Vector2(r, -r), Color("#dfe6ee"), 5.0)
 				draw_line(c + Vector2(-r * 0.6, r * 0.2), c + Vector2(-r * 0.2, r * 0.6), Color("#e8b84a"), 5.0)
@@ -114,10 +138,17 @@ func setup(main) -> void:
 	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mid.add_theme_constant_override("separation", 16)
 	root.add_child(mid)
+	var left := VBoxContainer.new()
+	left.custom_minimum_size = Vector2(470, 0)
+	left.add_theme_constant_override("separation", 8)
+	mid.add_child(left)
+	prof_bar = HBoxContainer.new()
+	prof_bar.add_theme_constant_override("separation", 4)
+	left.add_child(prof_bar)
 	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(470, 0)
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	mid.add_child(sc)
+	left.add_child(sc)
 	grid = GridContainer.new()
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 8)
@@ -278,10 +309,15 @@ func close() -> void:
 	visible = false
 	m.menu_closed()
 
+func open_prof(id: String) -> void:
+	prof_view = id
+	set_tab(3)
+
 func set_tab(i: int) -> void:
 	tab = wrapi(i, 0, TABS.size())
 	picking_slot = ""
 	sel = 0
+	pot.clear()
 	for j in tab_lbls.size():
 		var b: Button = tab_lbls[j]
 		b.add_theme_color_override("font_color", GOLD if j == tab else Color(0.75, 0.78, 0.82))
@@ -348,21 +384,49 @@ func gather_items() -> Array:
 			else:
 				for sl in Data.SLOTS:
 					var it = m.equipped.get(sl.id)
-					out.append({"kind": "slot", "slot": sl.id, "name": sl.piece, "shape": "pieza", "col": item_color(it) if it else Color(0, 0, 0, 0), "count": 0, "mark": ""})
+					out.append({"kind": "slot", "slot": sl.id, "name": m.piece_name(sl.id), "shape": "pieza", "col": item_color(it) if it else Color(0, 0, 0, 0), "count": 0, "mark": ""})
 		"Gemas":
 			for it in m.owned_items():
 				out.append(it)
-			for g in Data.GEMAS:
-				if m.can_combine(g.name) and not m.gemas.has(g.name):
-					out.append({"kind": "gema", "id": g.name, "count": 0, "craftable": true})
-		"Alquimia":
-			for pid in Data.PIEDRAS:
-				out.append({"kind": "piedra", "id": pid, "count": int(m.piedras.get(pid, 0)), "recipe": true})
+		"Oficio":
+			if not m.account_gm and m.prof == "":
+				for pid in Data.OFICIOS:
+					out.append({"kind": "oficio", "id": pid})
+				return out
+			if prof_view == "" or not m.has_prof(prof_view):
+				prof_view = m.prof if m.prof != "" else "cocinero"
+			match prof_view:
+				"cocinero":
+					for k in m.ingredients:
+						var left_n: int = int(m.ingredients[k]) - pot.count(k)
+						if int(m.ingredients[k]) > 0 and Data.INGREDIENTES.has(k):
+							out.append({"kind": "ing", "id": k, "count": left_n})
+				"alquimista":
+					for pid in Data.PIEDRAS:
+						out.append({"kind": "piedra", "id": pid, "count": int(m.piedras.get(pid, 0)), "recipe": true})
+					for dn in Data.DESTILADOS:
+						out.append({"kind": "destilado", "id": dn, "count": int(m.destilados.get(dn, 0)), "recipe": true})
+				"joyero":
+					out.append({"kind": "lupa"})
+					for g in Data.GEMAS:
+						out.append({"kind": "gema", "id": g.name, "count": int(m.gemas.get(g.name, 0)), "craft": true})
+				"armero":
+					for i in Data.APARIENCIAS.size():
+						out.append({"kind": "apariencia", "i": i})
+				"criador":
+					out.append({"kind": "silbato"})
+					for i in m.horses_owned.size():
+						out.append({"kind": "caballo", "i": i})
+				"constructor":
+					for cn in Data.CONSTRUCCIONES:
+						out.append({"kind": "construccion", "id": cn})
 		"Materiales":
 			for k in m.minerals:
 				if int(m.minerals[k]) > 0:
 					out.append({"kind": "mineral", "id": k, "count": int(m.minerals[k])})
 		"Comida":
+			for k in m.platos:
+				out.append({"kind": "plato", "id": k, "count": int(m.platos[k].n)})
 			for k in m.ingredients:
 				if int(m.ingredients[k]) > 0:
 					out.append({"kind": "comida", "id": k, "count": int(m.ingredients[k])})
@@ -372,6 +436,7 @@ func rebuild() -> void:
 	for c in grid.get_children():
 		c.queue_free()
 	items = gather_items()
+	build_prof_bar()
 	grid.columns = 3 if TABS[tab] == "Equipo" and picking_slot == "" else 5
 	for i in items.size():
 		var it: Dictionary = items[i]
@@ -395,9 +460,11 @@ func rebuild() -> void:
 			"gema":
 				ic.shape = "gema"
 				ic.col = item_color(it)
-				if it.get("craftable", false):
-					ic.mark = "+"
-					ic.modulate = Color(1, 1, 1, 0.55)
+				if it.get("craft", false):
+					if m.can_combine(it.id):
+						ic.mark = "+"
+					elif ic.count == 0:
+						ic.modulate = Color(1, 1, 1, 0.3)
 			"piedra":
 				ic.shape = "piedra"
 				ic.col = item_color(it)
@@ -414,7 +481,55 @@ func rebuild() -> void:
 			"slot", "arma":
 				ic.shape = it.shape
 				ic.col = it.col
+			"ing":
+				ic.shape = "planta"
+				ic.col = Color("#e8822a") if Data.INGREDIENTES[it.id].type == "carne" else Color("#7ee787")
+				if ic.count <= 0:
+					ic.modulate = Color(1, 1, 1, 0.3)
+			"plato":
+				ic.shape = "plato"
+				ic.col = Color("#e8b84a")
+			"destilado":
+				ic.shape = "frasco"
+				ic.col = {"Aceite de fuego": Color("#ff7b54"), "Aceite de rayo": Color("#f2cc60"), "Carga del frasco": Color("#ff6b8b")}[it.id]
+				if m.has_all(Data.DESTILADOS[it.id].recipe):
+					ic.mark = "+"
+				elif ic.count == 0:
+					ic.modulate = Color(1, 1, 1, 0.35)
+			"lupa":
+				ic.shape = "herramienta"
+				ic.col = Color("#7ee7ff") if m.sense_ores else Color("#9aa0a6")
+			"apariencia":
+				var ap: Dictionary = Data.APARIENCIAS[it.i]
+				ic.shape = "pieza"
+				ic.col = Color(0, 0, 0, 0)
+				if ap.name in m.wardrobe:
+					ic.mark = "✓"
+				elif m.has_all(ap.recipe):
+					ic.mark = "+"
+				else:
+					ic.modulate = Color(1, 1, 1, 0.4)
+			"silbato":
+				ic.shape = "herramienta"
+				ic.col = Color("#e8b84a")
+			"caballo":
+				ic.shape = "caballo"
+				ic.col = Color(m.horses_owned[it.i].col)
+			"construccion":
+				ic.shape = "herramienta"
+				ic.col = Color("#bdb39a")
+				if m.has_all(Data.CONSTRUCCIONES[it.id].recipe):
+					ic.mark = "+"
+				else:
+					ic.modulate = Color(1, 1, 1, 0.4)
+			"oficio":
+				ic.shape = "oficio"
+				ic.col = GOLD
 		cell.add_child(ic)
+		if it.kind == "oficio":
+			var ol := lbl(Data.OFICIOS[it.id].name, 12, GOLD)
+			ol.position = Vector2(4, 62)
+			cell.add_child(ol)
 		if big:
 			var nl := lbl(Data.SLOTS.filter(func(s): return s.id == it.slot)[0].name, 12, Color(0.75, 0.78, 0.82))
 			nl.position = Vector2(8, 4)
@@ -477,6 +592,8 @@ func describe() -> void:
 	desc_body.text = ""
 	if items.is_empty():
 		match TABS[tab]:
+			"Oficio":
+				desc_body.text = "No tenés ingredientes. Juntá hierbas, verduras y hongos, o cazá monstruos que se comen."
 			"Materiales":
 				desc_body.text = "Todavía no tenés minerales. Rompé vetas con ataques (los golpes pesados y las explosiones rompen el doble)."
 			"Comida":
@@ -498,7 +615,7 @@ func describe() -> void:
 		"slot":
 			var sl: Dictionary = Data.SLOTS.filter(func(s): return s.id == it.slot)[0]
 			var eq = m.equipped.get(it.slot)
-			desc_title.text = sl.piece
+			desc_title.text = m.piece_name(it.slot)
 			desc_sub.text = "%s · la pieza es solo apariencia; el poder está en lo que engarzás%s" % [sl.name, " · solo Movimiento" if it.slot == "pies" else ""]
 			if eq:
 				desc_body.text = "Engarzada: %s — %s" % [item_name(eq), stats_text(m.item_stats(eq))]
@@ -510,6 +627,9 @@ func describe() -> void:
 			else:
 				desc_body.text = "Sin gema. Engarzá una gema o una piedra suelta."
 				act("Engarzar", pick.bind(it.slot))
+			act("Cambiar apariencia", func():
+				m.cycle_look(it.slot)
+				rebuild())
 		"piedra":
 			var pd: Dictionary = Data.PIEDRAS[it.id]
 			desc_title.text = pd.name
@@ -520,7 +640,7 @@ func describe() -> void:
 			desc_body.text = "Receta: " + " + ".join(rec) + ". Se puede engarzar suelta (sin pasiva) o combinar en una gema."
 			if picking_slot != "":
 				act("Engarzar", equip_here.bind(it))
-			elif TABS[tab] == "Alquimia":
+			elif TABS[tab] == "Oficio":
 				act("Tallar", func():
 					m.carve(it.id)
 					rebuild(), m.can_carve(it.id))
@@ -537,10 +657,12 @@ func describe() -> void:
 			desc_body.text = "Pasiva: %s\nSe arma con: %s" % [g.passive, " + ".join(ps)]
 			if picking_slot != "":
 				act("Engarzar", equip_here.bind(it))
-			else:
+			elif TABS[tab] == "Oficio":
 				act("Combinar", func():
 					m.combine(g.name)
 					rebuild(), m.can_combine(g.name))
+			else:
+				act("Engarzar en…", func(): set_tab_equipo())
 		"mineral":
 			desc_title.text = it.id
 			desc_sub.text = "Mineral · tenés %d" % it.count
@@ -551,8 +673,145 @@ func describe() -> void:
 			desc_body.text = ("Sirve para: " + ", ".join(uses)) if uses.size() > 0 else "Catalizador: sirve para subir gemas de nivel (y lo usan otros oficios)."
 		"comida":
 			desc_title.text = it.id
-			desc_sub.text = "Ingrediente · tenés %d" % it.count
-			desc_body.text = "Se cocina en las fogatas (pronto) o lo usa el Alquimista."
+			var ing: Dictionary = Data.INGREDIENTES.get(it.id, {})
+			desc_sub.text = "Ingrediente · tenés %d%s" % [it.count, (" · cura %d" % ing.heal) if ing.has("heal") else ""]
+			var fxt: String = ("Al cocinarlo: " + Data.FX_NAMES[ing.fx] + " (" + Data.FX_DESC[ing.fx] + ").") if ing.has("fx") else ""
+			desc_body.text = fxt + (" " if fxt != "" else "") + "Crudo cura poco; asado en una fogata cura más; cocinado con otros (Cocinero) da efectos."
+			if ing.has("heal"):
+				act("Comer crudo", func():
+					m.eat(it.id, true)
+					rebuild())
+				act("Asar", func():
+					m.roast(it.id)
+					rebuild(), m.near_fire())
+		"plato":
+			var pd: Dictionary = m.platos[it.id]
+			desc_title.text = it.id
+			desc_sub.text = "Plato · tenés %d · cura %d" % [it.count, pd.heal]
+			desc_body.text = ("Efecto: %s, %s por %d s (solo PvE)." % [Data.FX_NAMES[pd.fx], Data.FX_DESC[pd.fx], int(pd.dur)]) if pd.fx != "" and pd.fx != "curacion" else "Sin efecto extra."
+			act("Comer", func():
+				m.eat(it.id)
+				rebuild())
+		"ing":
+			var ing2: Dictionary = Data.INGREDIENTES[it.id]
+			desc_title.text = "Olla de campaña"
+			var pv: Dictionary = m.cook_preview(pot)
+			desc_sub.text = "En la olla (%d/5): %s" % [pot.size(), ", ".join(pot) if pot.size() > 0 else "vacía — tocá ingredientes para agregarlos"]
+			if pv.is_empty():
+				desc_body.text = "%s: cura %d%s. Cocinar necesita estar en una fogata." % [it.id, ing2.heal, (" · efecto " + Data.FX_NAMES[ing2.fx]) if ing2.has("fx") else ""]
+			else:
+				desc_body.text = "Va a salir: %s (cura %d%s).%s" % [pv.name, pv.heal, (" · " + Data.FX_DESC[pv.fx]) if pv.fx != "" and pv.fx != "curacion" else "", " Dos efectos distintos se anulan." if pv.fail else ""]
+			act("Cocinar", func():
+				var made: String = m.cook(pot.duplicate())
+				if made != "":
+					m.toast("Cocinaste: " + made)
+				pot.clear()
+				rebuild(), m.near_fire() and pot.size() > 0)
+			act("Vaciar la olla", func():
+				pot.clear()
+				rebuild(), pot.size() > 0)
+			if not m.near_fire():
+				desc_sub.text += "   ·   acercate a una fogata para cocinar"
+		"destilado":
+			var dd: Dictionary = Data.DESTILADOS[it.id]
+			desc_title.text = it.id
+			var rec := []
+			for mn in dd.recipe:
+				rec.append(mn)
+			desc_sub.text = "Alquimia · tenés %d · receta: %s" % [it.count, " + ".join(rec)]
+			desc_body.text = ("Le pone %s al ataque básico." % dd.oil) if dd.oil != "" else "Recupera el 40% de la vida."
+			act("Destilar", func():
+				m.distill(it.id)
+				rebuild(), m.has_all(dd.recipe))
+			act("Usar", func():
+				m.use_distilled(it.id)
+				rebuild(), it.count > 0)
+		"lupa":
+			desc_title.text = "Lupa de joyero"
+			desc_sub.text = "Herramienta del Joyero"
+			desc_body.text = "Sentís las vetas cercanas: aparecen en el minimapa (90 m alrededor)."
+			act("Apagar" if m.sense_ores else "Sentir vetas", func():
+				m.sense_ores = not m.sense_ores
+				rebuild())
+		"apariencia":
+			var ap: Dictionary = Data.APARIENCIAS[it.i]
+			desc_title.text = ap.name
+			var sl_name: String = Data.SLOTS.filter(func(s): return s.id == ap.slot)[0].name
+			desc_sub.text = "Apariencia · %s · receta: %s" % [sl_name, " + ".join(ap.recipe)]
+			desc_body.text = "Ya la forjaste: cambiala desde Equipo." if ap.name in m.wardrobe else ("Solo cambia el look; la gema engarzada queda. " + ("" if m.in_forge() else "Necesitás la forja de una ciudad."))
+			act("Forjar", func():
+				m.forge(it.i)
+				refresh_preview()
+				rebuild(), m.in_forge() and m.has_all(ap.recipe) and not ap.name in m.wardrobe)
+		"silbato":
+			desc_title.text = "Lazo y silbato"
+			desc_sub.text = "Herramienta del Criador · caballos: %d" % m.horses_owned.size()
+			desc_body.text = "Domá caballos salvajes de las praderas acercándote con una zanahoria, calabaza o bayas (G). Llamá tu caballo con H."
+			act("Bajarse" if m.mounted else "Llamar caballo (H)", func():
+				m.toggle_mount()
+				rebuild(), m.horses_owned.size() > 0)
+		"caballo":
+			var hh: Dictionary = m.horses_owned[it.i]
+			desc_title.text = hh.name
+			desc_sub.text = "Montura · en el establo"
+			desc_body.text = "Corre un 60% más. Se puede atacar desde el caballo contra monstruos; en PvP la montura no hace daño y en duelos no se permite."
+		"construccion":
+			var cd: Dictionary = Data.CONSTRUCCIONES[it.id]
+			desc_title.text = it.id
+			desc_sub.text = "Constructor · receta: %s (madera: %d)" % [" + ".join(cd.recipe), m.wood]
+			desc_body.text = cd.desc + " Se construye delante tuyo, fuera de las ciudades."
+			act("Construir", func():
+				m.build_thing(it.id)
+				close(), m.has_all(cd.recipe) and not m.in_city(m.P.x, m.P.z))
+		"oficio":
+			var od: Dictionary = Data.OFICIOS[it.id]
+			desc_title.text = od.name
+			desc_sub.text = "Herramienta: %s · trabaja: %s" % [od.tool, od.where]
+			desc_body.text = od.desc + "\nUna cuenta normal elige un solo oficio."
+			act("Elegir este oficio", func():
+				m.prof = it.id
+				prof_view = it.id
+				m.save_progress()
+				rebuild())
+
+func build_prof_bar() -> void:
+	for c in prof_bar.get_children():
+		c.queue_free()
+	prof_bar.visible = TABS[tab] == "Oficio"
+	if not prof_bar.visible:
+		return
+	for pid in Data.OFICIOS:
+		if not m.has_prof(pid):
+			continue
+		var b := Button.new()
+		b.text = Data.OFICIOS[pid].name
+		b.focus_mode = Control.FOCUS_NONE
+		b.flat = true
+		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_color_override("font_color", GOLD if pid == prof_view else Color(0.7, 0.74, 0.78))
+		b.pressed.connect(func():
+			prof_view = pid
+			pot.clear()
+			sel = 0
+			rebuild())
+		prof_bar.add_child(b)
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	prof_bar.add_child(sp)
+	var gm := Button.new()
+	gm.text = "Cuenta GM ✓" if m.account_gm else "Cuenta normal"
+	gm.tooltip_text = "Para probar: la cuenta GM tiene todos los oficios; la normal elige uno"
+	gm.focus_mode = Control.FOCUS_NONE
+	gm.add_theme_font_size_override("font_size", 11)
+	gm.pressed.connect(func():
+		m.account_gm = not m.account_gm
+		if not m.account_gm:
+			m.prof = ""
+		m.save_progress()
+		prof_view = ""
+		sel = 0
+		rebuild())
+	prof_bar.add_child(gm)
 
 func set_tab_equipo() -> void:
 	set_tab(1)
@@ -576,6 +835,11 @@ func click(i: int) -> void:
 	var it: Dictionary = items[i]
 	if it.kind == "slot":
 		pick(it.slot)
+	elif it.kind == "ing" and pot.size() < 5 and int(it.count) > 0:
+		pot.append(it.id)
+		var keep := sel
+		rebuild()
+		sel = keep
 	elif picking_slot != "" and it.kind in ["gema", "piedra"]:
 		equip_here(it)
 
