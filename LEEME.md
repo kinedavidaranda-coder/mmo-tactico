@@ -61,3 +61,10 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - **Campamentos**: la mitad duerme junto al fuego ("Zzz"); el arquero es vigía y ve más lejos. El que te ve grita "¡Alerta!" y despierta al resto.
 - **Te perdió en el pasto**: va a buscarte adonde te vio por última vez, mira para todos lados y vuelve.
 - Conejo cornudo huye · jabalí no ataca si no lo provocás, pero embiste en línea · lobos rodean y entran de a uno · oso solo ataca de cerca · goblins huyen heridos y salen corriendo si cae el ogro · gólem duerme como roca hasta que lo pisás · espectro casi invisible, se teletransporta · troll se regenera si dejás de pegarle (el fuego lo frena).
+
+## Vetas de mineral (para el Alquimista)
+Rocas con cristales que se rompen a golpes, con ataques o explosiones, y vuelven a aparecer a los 5 minutos:
+- **Veta de piedra** (gris, en todo el reino): pedernal y sal de roca.
+- **Veta de azufre** (amarilla, cañadón del oeste): azufre y ámbar.
+- **Veta de cristal** (celeste, brilla; montañas del norte): cuarzo y luminita.
+- **Veta preciosa** (roja, brilla; muy rara, en las cumbres): rubí ígneo, zafiro helado y, muy de vez en cuando, diamante.

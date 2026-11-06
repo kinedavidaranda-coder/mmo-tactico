@@ -90,6 +90,19 @@ const MOBDEF = {
 	"troll":   {"name": "Troll de las nieves", "temper": "regen", "ai": "melee", "body": "brute", "size": 0.8, "hp": 520.0, "r": 1.3, "speed": 4.0, "aggro": 13.0, "dmg": 28.0, "xp": 40, "color": Color("#b9c7d6"), "accent": Color("#7d8fa3"), "reach": 2.6, "wind": 0.55, "cd": 1.5, "food": "Grasa de troll"},
 }
 
+# vetas de mineral que se rompen a golpes (como en BotW); los minerales van al Alquimista
+# (y los preciosos también al Joyero). Vuelven a aparecer a los 5 minutos.
+const ORES = {
+	"piedra":   {"name": "Veta de piedra", "hp": 60.0, "rock": Color("#8a8780"), "gem": Color("#e6dfcf"), "glow": false,
+				 "drops": [["Pedernal", 0.8], ["Sal de roca", 0.5]]},
+	"azufre":   {"name": "Veta de azufre", "hp": 90.0, "rock": Color("#8c6f4e"), "gem": Color("#f0cf3a"), "glow": false,
+				 "drops": [["Azufre", 0.9], ["Ámbar", 0.35]]},
+	"cristal":  {"name": "Veta de cristal", "hp": 140.0, "rock": Color("#6f7480"), "gem": Color("#7ee7ff"), "glow": true,
+				 "drops": [["Cuarzo", 0.9], ["Luminita", 0.4]]},
+	"preciosa": {"name": "Veta preciosa", "hp": 220.0, "rock": Color("#4a4a52"), "gem": Color("#ff5a6e"), "glow": true,
+				 "drops": [["Rubí ígneo", 0.5], ["Zafiro helado", 0.5], ["Diamante", 0.08]]},
+}
+
 # franjas de nivel del mundo (para nombres de zona y colores)
 const TIERS = [
 	{"name": "Animales", "lvl": [1, 15], "color": Color("#7ee787")},

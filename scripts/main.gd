@@ -217,7 +217,10 @@ var tree_grid := {}
 var falling: Array = []
 var regrowing: Array = []
 var wood := 0
-var ingredients := {}                # ingredientes de cocina que sueltan los bichos
+var ingredients := {}
+var minerals := {}                   # minerales de las vetas (para el Alquimista)
+var ores: Array = []
+var last_col := {}                # ingredientes de cocina que sueltan los bichos
 var camps: Array = []                # campamentos de monstruos (por franja de nivel)
 var fence_xf: Array = []             # postes de cercos (MultiMesh)
 var fence_col: Array = []
@@ -565,6 +568,7 @@ func build_world() -> void:
 	plan_camps()
 	build_structures()
 	build_vegetation()
+	build_ores()
 	# minimapa
 	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
 	# línea de apuntado hacia el cursor
@@ -652,7 +656,7 @@ func build_capital() -> void:
 
 # ----------------------------------------------------------------- colisiones (muros y edificios)
 func add_collider(c: Vector2, half: Vector2, rot: float) -> void:
-	var col := {"c": c, "h": half, "r": rot}
+	var col := {"c": c, "h": half, "r": rot, "off": false}
 	colliders.append(col)
 	var reach: float = half.length()
 	for gx in range(int(floor((c.x - reach) / 16.0)), int(floor((c.x + reach) / 16.0)) + 1):
@@ -661,6 +665,7 @@ func add_collider(c: Vector2, half: Vector2, rot: float) -> void:
 			if not col_grid.has(k):
 				col_grid[k] = []
 			col_grid[k].append(col)
+	last_col = col
 
 func solid_box(size: Vector3, c: Color, pos: Vector3, rot: float) -> MeshInstance3D:
 	var mi := box(size, c, pos, world)
@@ -674,6 +679,8 @@ func blocked(x: float, z: float, pad := 0.6) -> bool:
 	if not col_grid.has(k):
 		return false
 	for col in col_grid[k]:
+		if col.get("off", false):
+			continue
 		var dx: float = x - col.c.x
 		var dz: float = z - col.c.y
 		var cr := cos(col.r)
@@ -1398,6 +1405,7 @@ func build_ground_cover() -> void:
 func damage_trees(x: float, z: float, r: float, dmg: float, once = null) -> void:
 	if dmg <= 0:
 		return
+	damage_ores(x, z, r, dmg, once)
 	for gx in range(int(floor((x - r - 3.0) / 16.0)), int(floor((x + r + 3.0) / 16.0)) + 1):
 		for gz in range(int(floor((z - r - 3.0) / 16.0)), int(floor((z + r + 3.0) / 16.0)) + 1):
 			var k := Vector2i(gx, gz)
@@ -1450,6 +1458,104 @@ func tree_at(x: float, z: float):
 		if t.alive and Vector2(t.x - x, t.z - z).length() < 0.35 * t.sc + 0.25:
 			return t
 	return null
+
+# ----------------------------------------------------------------- vetas de mineral
+func build_ores() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 4242
+	var plan = [["piedra", 70, -470.0, 470.0, -280.0, 470.0], ["azufre", 26, -500.0, -270.0, -250.0, 300.0],
+		["cristal", 26, -470.0, 470.0, -470.0, -230.0], ["preciosa", 9, -470.0, 470.0, -480.0, -320.0]]
+	for pl in plan:
+		var made := 0
+		var tries := 0
+		while made < int(pl[1]) and tries < 3000:
+			tries += 1
+			var x := r.randf_range(pl[2], pl[3])
+			var z := r.randf_range(pl[4], pl[5])
+			if in_city(x, z, 15.0) or terrain.road_dist(Vector2(x, z)) < 4.0 or terrain.river_dist(Vector2(x, z)) < 5.0:
+				continue
+			var h: float = terrain.height(x, z)
+			if h < 1.5 or blocked(x, z, 2.5):
+				continue
+			if abs(terrain.height(x + 2, z) - terrain.height(x - 2, z)) + abs(terrain.height(x, z + 2) - terrain.height(x, z - 2)) > 3.5:
+				continue
+			add_ore(pl[0], x, z, r)
+			made += 1
+
+func add_ore(kind: String, x: float, z: float, r: RandomNumberGenerator) -> void:
+	var d: Dictionary = Data.ORES[kind]
+	var node := Node3D.new()
+	node.position = Vector3(x, H(x, z), z)
+	node.rotation.y = r.randf() * TAU
+	world.add_child(node)
+	var sc := r.randf_range(1.3, 1.7)
+	node.scale = Vector3.ONE * sc
+	for k in 3:
+		var rk := box(Vector3(r.randf_range(1.0, 1.6), r.randf_range(0.8, 1.4), r.randf_range(1.0, 1.5)), d.rock.darkened(r.randf() * 0.15),
+			Vector3(r.randf_range(-0.5, 0.5), 0.4, r.randf_range(-0.5, 0.5)), node)
+		rk.rotation = Vector3(r.randf_range(-0.3, 0.3), r.randf() * TAU, r.randf_range(-0.3, 0.3))
+	for k in 8:
+		var a := r.randf() * TAU
+		var g := box(Vector3(0.32, r.randf_range(0.6, 1.1), 0.32), d.gem, Vector3(cos(a) * 0.7, r.randf_range(0.8, 1.3), sin(a) * 0.7), node)
+		g.rotation = Vector3(r.randf_range(-0.6, 0.6), r.randf() * TAU, r.randf_range(-0.6, 0.6))
+		if d.glow:
+			g.material_override.emission_enabled = true
+			g.material_override.emission = d.gem
+			g.material_override.emission_energy_multiplier = 0.8
+	add_collider(Vector2(x, z), Vector2(1.0, 1.0) * sc, 0.0)
+	ores.append({"kind": kind, "x": x, "z": z, "hp": d.hp, "max": d.hp, "node": node, "col": last_col, "regrow": 0.0, "sc": sc})
+
+func damage_ores(x: float, z: float, r: float, dmg: float, once = null) -> void:
+	for o in ores:
+		if o.regrow > 0:
+			continue
+		if Vector2(o.x - x, o.z - z).length() > r + 1.2 * o.sc:
+			continue
+		if once != null:
+			if once.has(o.node):
+				continue
+			once[o.node] = true
+		o.hp -= dmg
+		add_text(Vector3(o.x, 2.4, o.z), str(int(dmg)), Color("#c9d1d9"), 13)
+		if o.hp <= 0:
+			break_ore(o)
+
+func break_ore(o: Dictionary) -> void:
+	var d: Dictionary = Data.ORES[o.kind]
+	o.regrow = 300.0                 # vuelve a aparecer a los 5 minutos
+	o.node.visible = false
+	o.col.off = true
+	flash_fx("ring", o.x, o.z, 2.2, Vector2(0, 1), d.gem)
+	var got := []
+	for dr in d.drops:
+		if randf() < float(dr[1]):
+			var n := 1 + (1 if randf() < 0.3 else 0)
+			minerals[dr[0]] = int(minerals.get(dr[0], 0)) + n
+			got.append("+%d %s" % [n, dr[0]])
+	if got.is_empty():
+		var first: String = d.drops[0][0]
+		minerals[first] = int(minerals.get(first, 0)) + 1
+		got.append("+1 " + first)
+	add_text(Vector3(o.x, 3.2, o.z), "  ".join(got), d.gem.lightened(0.3), 14)
+	# escombros
+	for k in 4:
+		var frag := box(Vector3(0.4, 0.3, 0.4), d.rock, Vector3(o.x + randf_range(-1, 1), H(o.x, o.z) + 0.15, o.z + randf_range(-1, 1)), world)
+		frag.rotation.y = randf() * TAU
+		o["frags"] = o.get("frags", []) + [frag]
+
+func update_ores(dt: float) -> void:
+	for o in ores:
+		if o.regrow > 0:
+			o.regrow -= dt
+			if o.regrow <= 0 and d2(P.x, P.z, o.x, o.z) > 3.0:
+				o.hp = o.max
+				o.node.visible = true
+				o.col.off = false
+				for f in o.get("frags", []):
+					f.queue_free()
+				o["frags"] = []
+			elif o.regrow <= 0:
+				o.regrow = 1.0           # esperá a que te corras
 
 func update_trees(dt: float) -> void:
 	for i in range(falling.size() - 1, -1, -1):
@@ -2226,7 +2332,10 @@ func update_ui() -> void:
 	var ning := 0
 	for f in ingredients:
 		ning += int(ingredients[f])
-	chips_lbl.text = "%s ✓   %s   Madera: %d   Ingredientes: %d   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", wood, ning, st]
+	var nmin := 0
+	for f in minerals:
+		nmin += int(minerals[f])
+	chips_lbl.text = "%s ✓   %s   Madera: %d   Ingredientes: %d   Minerales: %d   %s" % [weapon.passive.name, "Tejido ●" if P.weave > 0 else "Tejido ○", wood, ning, nmin, st]
 	for slot in ACT:
 		var b: Button = skill_btns[slot]
 		var r := int(R()[slot])
@@ -3211,6 +3320,7 @@ func update_game(dt: float) -> void:
 	update_blasts(dt)
 	update_living(dt)
 	update_trees(dt)
+	update_ores(dt)
 	for i in range(zones.size() - 1, -1, -1):
 		var zn: Zone = zones[i]
 		zn.t -= dt
@@ -3864,6 +3974,19 @@ func draw_overlay() -> void:
 			tag += "◆"
 		if tag != "":
 			overlay.draw_string(font, Vector2(p.x - 50, p.y - 20), tag, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color("#f2cc60"))
+	for o in ores:
+		if o.regrow > 0 or d2(P.x, P.z, o.x, o.z) > 14.0:
+			continue
+		var op := Vector3(o.x, H(o.x, o.z) + 2.3 * o.sc, o.z)
+		if camera.is_position_behind(op):
+			continue
+		var q := camera.unproject_position(op)
+		var od: Dictionary = Data.ORES[o.kind]
+		overlay.draw_string_outline(font, q + Vector2(-70, 0), od.name, HORIZONTAL_ALIGNMENT_CENTER, 140, 11, 3, Color(0, 0, 0, 0.8))
+		overlay.draw_string(font, q + Vector2(-70, 0), od.name, HORIZONTAL_ALIGNMENT_CENTER, 140, 11, od.gem.lightened(0.2))
+		if o.hp < o.max:
+			overlay.draw_rect(Rect2(q.x - 19, q.y + 4, 38, 4), Color(0, 0, 0, 0.6))
+			overlay.draw_rect(Rect2(q.x - 19, q.y + 4, 38 * max(0.0, o.hp) / o.max, 4), od.gem)
 	for t in texts:
 		if camera.is_position_behind(t.pos):
 			continue
