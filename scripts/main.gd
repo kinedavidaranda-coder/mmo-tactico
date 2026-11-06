@@ -1059,7 +1059,7 @@ func damage_trees(x: float, z: float, r: float, dmg: float, once = null) -> void
 
 func fell_tree(t: TreeObj, fx: float, fz: float) -> void:
 	t.alive = false
-	t.regrow = 90.0
+	t.regrow = 120.0 if t.size == 0 else 300.0     # chicos: 2 min, medianos: 5 min
 	regrowing.append(t)
 	var xf := tree_xform(t)
 	tree_mms[t.sp].set_instance_transform(t.idx, Transform3D(Basis().scaled(Vector3.ONE * 0.001), Vector3(t.x, -50, t.z)))

@@ -41,5 +41,5 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - Cuatro especies (pinos, árboles redondos, abedules y de otoño) en tres tamaños, más pasto bajo y flores que solo se dibujan cerca de la cámara.
 - **Chicos:** se rompen con un par de golpes. **Medianos:** aguantan; los voltea una habilidad fuerte o varios golpes. **Grandes:** no se rompen y bloquean el paso.
 - El daño que hacés es el que reciben, así que cuanto más fuerte sos (rangos de habilidad), más fácil los volteás. Los proyectiles chocan con los troncos.
-- Al caer dejan un tocón y dan madera (chico 1, mediano 3). Vuelven a crecer a los 90 segundos.
+- Al caer dejan un tocón y dan madera (chico 1, mediano 3). Vuelven a crecer: los chicos a los 2 minutos y los medianos a los 5.
 - Hay cuatro árboles antiguos gigantes como puntos de referencia del mapa.
