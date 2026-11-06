@@ -62,9 +62,16 @@ Probado con Godot 4.7.2 y renderizador Compatibility (anda con gráficos integra
 - **Te perdió en el pasto**: va a buscarte adonde te vio por última vez, mira para todos lados y vuelve.
 - Conejo cornudo huye · jabalí no ataca si no lo provocás, pero embiste en línea · lobos rodean y entran de a uno · oso solo ataca de cerca · goblins huyen heridos y salen corriendo si cae el ogro · gólem duerme como roca hasta que lo pisás · espectro casi invisible, se teletransporta · troll se regenera si dejás de pegarle (el fuego lo frena).
 
-## Vetas de mineral (para el Alquimista)
-Rocas con cristales que se rompen a golpes, con ataques o explosiones, y vuelven a aparecer a los 5 minutos:
-- **Veta de piedra** (gris, en todo el reino): pedernal y sal de roca.
-- **Veta de azufre** (amarilla, cañadón del oeste): azufre y ámbar.
-- **Veta de cristal** (celeste, brilla; montañas del norte): cuarzo y luminita.
-- **Veta preciosa** (roja, brilla; muy rara, en las cumbres): rubí ígneo, zafiro helado y, muy de vez en cuando, diamante.
+## Vetas de mineral
+Rocas con cristales que se rompen a golpes y vuelven a aparecer a los 5 minutos. Espada larga, espada y escudo y explosiones rompen el doble; la magia, la mitad.
+- **Piedra** (gris, Nv 1–35): pedernal y sal de roca.
+- **Hierro** (óxido, caminos Nv 15–35): hierro.
+- **Azufre** (amarilla, cañadón del oeste): azufre y ámbar.
+- **Cuarzo solar** (dorada, brilla): el mineral propio del Imperio de la Luz (gemas de Defensa).
+- **Plata** (fronteras Nv 35–45) y **mithril** (celeste, cumbres).
+- **Veta extranjera** (roja, en los bordes del mapa): un mineral de otra facción. Por eso la frontera se pelea.
+
+## Lugares para descubrir
+- **12 santuarios** con un haz de luz naranja que se ve de lejos. Al tocarlos se vuelven celestes y aparecen en el minimapa: hacé clic en uno (o en una ciudad) para viajar.
+- **Cofres**: uno en cada campamento (se abre cuando no queda ningún monstruo) y 18 escondidos.
+- **Posadas** con corral y caballos en los caminos, **fogatas** de viajeros, un **puente** sobre el río, **carteles** con direcciones, **arcos de piedra** en el campo, **bandadas de pájaros** y **viajeros** que van y vienen por los caminos.

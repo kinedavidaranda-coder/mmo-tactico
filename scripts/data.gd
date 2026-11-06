@@ -90,17 +90,35 @@ const MOBDEF = {
 	"troll":   {"name": "Troll de las nieves", "temper": "regen", "ai": "melee", "body": "brute", "size": 0.8, "hp": 520.0, "r": 1.3, "speed": 4.0, "aggro": 13.0, "dmg": 28.0, "xp": 40, "color": Color("#b9c7d6"), "accent": Color("#7d8fa3"), "reach": 2.6, "wind": 0.55, "cd": 1.5, "food": "Grasa de troll"},
 }
 
-# vetas de mineral que se rompen a golpes (como en BotW); los minerales van al Alquimista
-# (y los preciosos también al Joyero). Vuelven a aparecer a los 5 minutos.
+# vetas de mineral que se rompen a golpes (como en BotW). Vuelven a aparecer a los 5 minutos.
+# Golpes pesados (espada larga, espada y escudo) y explosiones: ×2 · magia: ×0,5.
+# Minerales:
+#  - comunes y de alquimia: pedernal, sal de roca, azufre, ámbar, luminita
+#  - catalizadores por tramo (suben la gema de nivel): pedernal (Nv1) · hierro (Nv2) · plata (Nv3) · mithril (Nv4) · ...
+#  - minerales de facción (definen la categoría de la gema): cada facción tiene el suyo en su territorio;
+#    los otros se consiguen comerciando en el Puerto libre o en las vetas de la frontera, que se disputan en la guerra.
+const FACTION_MINERALS = {
+	"luz": {"mineral": "Cuarzo solar", "gem": "Defensa"},
+	"abismo": {"mineral": "Obsidiana del vacío", "gem": "Magia"},
+	"oriente": {"mineral": "Jade de viento", "gem": "Movimiento"},
+	"salvajes": {"mineral": "Rubí ígneo", "gem": "Ataque"},
+	"arenas": {"mineral": "Perla de marea", "gem": "Soporte"},
+}
 const ORES = {
 	"piedra":   {"name": "Veta de piedra", "hp": 60.0, "rock": Color("#8a8780"), "gem": Color("#e6dfcf"), "glow": false,
 				 "drops": [["Pedernal", 0.8], ["Sal de roca", 0.5]]},
+	"hierro":   {"name": "Veta de hierro", "hp": 100.0, "rock": Color("#6e5a4c"), "gem": Color("#b5552e"), "glow": false,
+				 "drops": [["Hierro", 0.9], ["Pedernal", 0.3]]},
 	"azufre":   {"name": "Veta de azufre", "hp": 90.0, "rock": Color("#8c6f4e"), "gem": Color("#f0cf3a"), "glow": false,
 				 "drops": [["Azufre", 0.9], ["Ámbar", 0.35]]},
-	"cristal":  {"name": "Veta de cristal", "hp": 140.0, "rock": Color("#6f7480"), "gem": Color("#7ee7ff"), "glow": true,
-				 "drops": [["Cuarzo", 0.9], ["Luminita", 0.4]]},
-	"preciosa": {"name": "Veta preciosa", "hp": 220.0, "rock": Color("#4a4a52"), "gem": Color("#ff5a6e"), "glow": true,
-				 "drops": [["Rubí ígneo", 0.5], ["Zafiro helado", 0.5], ["Diamante", 0.08]]},
+	"cuarzo":   {"name": "Veta de cuarzo solar", "hp": 120.0, "rock": Color("#9a917e"), "gem": Color("#ffe9a8"), "glow": true,
+				 "drops": [["Cuarzo solar", 0.9], ["Luminita", 0.3]]},
+	"plata":    {"name": "Veta de plata", "hp": 160.0, "rock": Color("#5f6168"), "gem": Color("#dfe6ee"), "glow": false,
+				 "drops": [["Plata", 0.9], ["Ámbar", 0.3]]},
+	"mithril":  {"name": "Veta de mithril", "hp": 220.0, "rock": Color("#4a4a52"), "gem": Color("#7ee7ff"), "glow": true,
+				 "drops": [["Mithril", 0.9], ["Luminita", 0.4]]},
+	"frontera": {"name": "Veta extranjera", "hp": 260.0, "rock": Color("#3d3540"), "gem": Color("#ff5a6e"), "glow": true,
+				 "drops": [["Rubí ígneo", 0.3], ["Obsidiana del vacío", 0.3], ["Jade de viento", 0.3], ["Perla de marea", 0.3]]},
 }
 
 # franjas de nivel del mundo (para nombres de zona y colores)

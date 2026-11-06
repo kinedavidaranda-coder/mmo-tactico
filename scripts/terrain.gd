@@ -19,7 +19,7 @@ const LAKE := Vector2(300, 140)
 const LAKE_R := 85.0
 const RIVER = [Vector2(-90, -470), Vector2(-70, -330), Vector2(-20, -200), Vector2(60, -110), Vector2(110, -20), Vector2(170, 60), Vector2(240, 110), Vector2(300, 140)]
 const ROADS = [
-	[Vector2(0, 0), Vector2(-15, -120), Vector2(-40, -230), Vector2(-75, -340), Vector2(-95, -480)],   # norte, al paso de montaña
+	[Vector2(0, 0), Vector2(-30, -110), Vector2(-85, -210), Vector2(-125, -320), Vector2(-135, -480)],  # norte, al paso de montaña
 	[Vector2(0, 0), Vector2(120, -30), Vector2(230, -40), Vector2(360, -70), Vector2(500, -90)],        # este, al bosque
 	[Vector2(0, 0), Vector2(-150, 25), Vector2(-280, 50), Vector2(-500, 70)],                          # oeste, al cañadón
 	[Vector2(0, 0), Vector2(25, 150), Vector2(10, 300), Vector2(0, 500)],                              # sur, a los campos
@@ -55,6 +55,19 @@ static func poly_dist(p: Vector2, pts: Array) -> float:
 	for i in pts.size() - 1:
 		d = min(d, seg_dist(p, pts[i], pts[i + 1]))
 	return d
+
+# puntos donde un camino cruza el río (ahí van los puentes)
+static func crossings() -> Array:
+	var out := []
+	for road in ROADS:
+		for i in road.size() - 1:
+			for j in RIVER.size() - 1:
+				var q = Geometry2D.segment_intersects_segment(road[i], road[i + 1], RIVER[j], RIVER[j + 1])
+				if q != null:
+					out.append(q)
+	return out
+
+static var CROSSINGS: Array = crossings()
 
 func road_dist(p: Vector2) -> float:
 	var d := INF
@@ -95,6 +108,8 @@ func base_height(x: float, z: float) -> float:
 	var dd := road_dist(p)
 	if dd < 10.0:
 		var k: float = smoothstep(10.0, 3.0, dd)
+		for cx in CROSSINGS:
+			k *= smoothstep(6.0, 20.0, p.distance_to(cx))     # donde el camino cruza el río hay un puente
 		var flat: float = max(0.6, lerp(h, 3.0 + n * 3.0, 0.7)) if north < 0.5 else h
 		h = lerp(h, flat, k * 0.85)
 	# capital Lumen: meseta plana un poco elevada

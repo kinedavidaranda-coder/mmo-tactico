@@ -220,7 +220,12 @@ var wood := 0
 var ingredients := {}
 var minerals := {}                   # minerales de las vetas (para el Alquimista)
 var ores: Array = []
-var last_col := {}                # ingredientes de cocina que sueltan los bichos
+var last_col := {}
+var shrines: Array = []              # santuarios (viaje rápido)
+var chests: Array = []
+var pois: Array = []                 # nombres que se ven al acercarte
+var flocks: Array = []
+var travelers: Array = []                # ingredientes de cocina que sueltan los bichos
 var camps: Array = []                # campamentos de monstruos (por franja de nivel)
 var fence_xf: Array = []             # postes de cercos (MultiMesh)
 var fence_col: Array = []
@@ -397,7 +402,26 @@ func in_city(x: float, z: float, margin := 0.0) -> bool:
 
 # altura del suelo (o del agua) en un punto
 func H(x: float, z: float) -> float:
-	return terrain.ground(x, z) if terrain else 0.0
+	if not terrain:
+		return 0.0
+	var h: float = terrain.ground(x, z)
+	if h < 2.5 and not bridges.is_empty():
+		var bt := bridge_top(x, z)
+		if bt > h:
+			return bt
+	return h
+
+var bridges: Array = []
+
+# altura de la tabla del puente en (x, z), o -INF si no hay puente
+func bridge_top(x: float, z: float) -> float:
+	for b in bridges:
+		var d: Vector2 = Vector2(x, z) - b.c
+		var along: float = d.dot(b.dir)
+		var across: float = d.dot(Vector2(b.dir.y, -b.dir.x))
+		if abs(along) < b.hl and abs(across) < 2.5:
+			return b.y + 0.25
+	return -INF
 
 # ================================================================= GEOMETRÍA
 func mat(c: Color) -> StandardMaterial3D:
@@ -569,6 +593,7 @@ func build_world() -> void:
 	build_structures()
 	build_vegetation()
 	build_ores()
+	build_points_of_interest()
 	# minimapa
 	minimap_tex = ImageTexture.create_from_image(terrain.minimap_image(256))
 	# línea de apuntado hacia el cursor
@@ -738,7 +763,7 @@ func build_structures() -> void:
 	var roof := Color("#3d5f9e")
 	var straw := Color("#c9a94f")
 	# torres de vigía en los caminos
-	for spot in [Vector2(-25, -150), Vector2(150, -45), Vector2(-160, 35), Vector2(28, 190), Vector2(-60, -320), Vector2(330, -75)]:
+	for spot in [Vector2(-50, -150), Vector2(150, -45), Vector2(-160, 35), Vector2(28, 190), Vector2(-115, -300), Vector2(330, -75)]:
 		var x: float = spot.x + 9.0
 		var z: float = spot.y + 6.0
 		var y := H(x, z)
@@ -1402,10 +1427,10 @@ func build_ground_cover() -> void:
 				world.add_child(mi)
 
 # ----------------------------------------------------------------- árboles que se rompen según tu poder
-func damage_trees(x: float, z: float, r: float, dmg: float, once = null) -> void:
+func damage_trees(x: float, z: float, r: float, dmg: float, once = null, blast := false) -> void:
 	if dmg <= 0:
 		return
-	damage_ores(x, z, r, dmg, once)
+	damage_ores(x, z, r, dmg, once, blast)
 	for gx in range(int(floor((x - r - 3.0) / 16.0)), int(floor((x + r + 3.0) / 16.0)) + 1):
 		for gz in range(int(floor((z - r - 3.0) / 16.0)), int(floor((z + r + 3.0) / 16.0)) + 1):
 			var k := Vector2i(gx, gz)
@@ -1459,19 +1484,370 @@ func tree_at(x: float, z: float):
 			return t
 	return null
 
+# ----------------------------------------------------------------- lugares de interés (que el mundo no se sienta vacío)
+const SHRINE_NAMES = ["Alba", "Vigía", "Rocío", "Brasa", "Eco", "Faro", "Cenit", "Bruma", "Ceniza", "Escarcha", "Umbral", "Ocaso"]
+
+func find_site(p: Vector2, r: float) -> Vector2:
+	if site_ok(p.x, p.y, r):
+		return p
+	for ring in range(1, 30):
+		for k in 16:
+			var a := TAU * k / 16.0
+			var q := p + Vector2(cos(a), sin(a)) * ring * 4.0
+			if site_ok(q.x, q.y, r):
+				return q
+	return Vector2(INF, INF)
+
+func glow_mat(c: Color, e := 1.2) -> StandardMaterial3D:
+	var m := mat(c)
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = e
+	return m
+
+func build_points_of_interest() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 2026
+	# santuarios: un pedestal con luz; de lejos se ve un haz naranja hasta que lo descubrís
+	var spots = [Vector2(95, -30), Vector2(-150, -70), Vector2(-120, 170), Vector2(130, 175), Vector2(260, -60), Vector2(-330, 10),
+		Vector2(40, -200), Vector2(-260, 230), Vector2(300, 230), Vector2(-200, -280), Vector2(230, -300), Vector2(420, -40)]
+	for i in spots.size():
+		var q: Vector2 = find_site(spots[i], 4.0)
+		if q.x == INF:
+			continue
+		var y := H(q.x, q.y)
+		solid_box(Vector3(5, 0.6, 5), Color("#d8d0bd"), Vector3(q.x, y + 0.2, q.y), PI / 4)
+		for k in 4:
+			var a := PI / 4 + k * PI / 2
+			cyl(0.35, 0.45, 2.2, Color("#cfc7b5"), Vector3(q.x + cos(a) * 2.6, y + 1.1, q.y + sin(a) * 2.6), world, 6)
+		cyl(0.7, 0.9, 2.4, Color("#bdb39f"), Vector3(q.x, y + 1.5, q.y), world, 8)
+		var orb := sphere(0.6, Color("#ff9b50"), Vector3(q.x, y + 3.2, q.y), world)
+		orb.material_override = glow_mat(Color("#ff9b50"), 1.0)
+		var beam := cyl(0.8, 0.8, 70.0, Color("#ffb070"), Vector3(q.x, y + 38.0, q.y), world, 10)
+		beam.material_override = ind_mat(Color("#ffa05a"), 0.4)
+		beam.material_override.no_depth_test = false
+		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		shrines.append({"name": "Santuario " + SHRINE_NAMES[i], "x": q.x, "z": q.y, "found": false, "orb": orb, "beam": beam})
+	# posadas en los caminos, con corral y caballos
+	var inns = [[Vector2(-50, -150), "Posada del Paso Norte"], [Vector2(150, -45), "Posada del Río"], [Vector2(28, 190), "Posada de los Campos"]]
+	for inn in inns:
+		var q: Vector2 = find_site(inn[0] + Vector2(16, 10), 9.0)
+		if q.x == INF:
+			continue
+		var y := H(q.x, q.y)
+		var a := r.randf() * TAU
+		solid_box(Vector3(12, 5, 8), Color("#efe4cc"), Vector3(q.x, y + 2.5, q.y), a)
+		var roof := cyl(0.01, 8.5, 3.5, Color("#9b4d2e"), Vector3(q.x, y + 6.7, q.y), world, 4)
+		roof.rotation.y = a + PI / 4
+		roof.scale = Vector3(1.0, 1.0, 0.7)
+		for k in 2:
+			var bx := q + Vector2(cos(a), -sin(a)) * (k * 8.0 - 4.0) + Vector2(sin(a), cos(a)) * 4.4
+			box(Vector3(0.9, 1.4, 0.1), Color("#5b3a1e"), Vector3(bx.x, y + 1.0, bx.y), world).rotation.y = a
+		var cor := q + Vector2(sin(a), cos(a)) * 13.0
+		var fx := Vector2(cos(a), -sin(a))
+		var fz := Vector2(sin(a), cos(a))
+		var c4 = [cor - fx * 7 - fz * 4, cor + fx * 7 - fz * 4, cor + fx * 7 + fz * 4, cor - fx * 7 + fz * 4, cor - fx * 7 - fz * 4]
+		for k in 4:
+			if k == 0:
+				fence_run(c4[0], c4[0] + fx * 4.0, "rustico", r)
+				fence_run(c4[1] - fx * 4.0, c4[1], "rustico", r)
+			else:
+				fence_run(c4[k], c4[k + 1], "rustico", r)
+		for k in 2:
+			var hp := cor + fx * (k * 5.0 - 2.5)
+			var horse := Node3D.new()
+			horse.position = Vector3(hp.x, H(hp.x, hp.y), hp.y)
+			horse.rotation.y = r.randf() * TAU
+			world.add_child(horse)
+			var hc: Color = [Color("#7a4a2a"), Color("#e8e0d0"), Color("#2e2620")][r.randi() % 3]
+			box(Vector3(0.8, 0.9, 2.2), hc, Vector3(0, 1.5, 0), horse)
+			var neck := box(Vector3(0.45, 1.2, 0.5), hc, Vector3(0, 2.2, 1.0), horse)
+			neck.rotation.x = 0.5
+			box(Vector3(0.4, 0.45, 0.8), hc.darkened(0.1), Vector3(0, 2.75, 1.45), horse)
+			for lx in [-0.3, 0.3]:
+				for lz in [-0.85, 0.85]:
+					box(Vector3(0.18, 1.1, 0.18), hc.darkened(0.25), Vector3(lx, 0.55, lz), horse)
+		pois.append({"name": inn[1], "x": q.x, "z": q.y, "r": 30.0})
+	# puentes donde los caminos cruzan el río
+	for cxp in Terrain.CROSSINGS:
+		var best: Vector2 = cxp
+		var dir := Vector2.ZERO
+		for road in Terrain.ROADS:
+			for i in road.size() - 1:
+				if Geometry2D.get_closest_point_to_segment(best, road[i], road[i + 1]).distance_to(best) < 0.5:
+					dir = (road[i + 1] - road[i]).normalized()
+		if dir == Vector2.ZERO:
+			continue
+		var rot := atan2(dir.x, dir.y)
+		# largo: hasta que las dos orillas queden por encima del agua
+		var hl := 8.0
+		while hl < 26.0 and (terrain.height(best.x + dir.x * hl, best.y + dir.y * hl) < 1.0 or terrain.height(best.x - dir.x * hl, best.y - dir.y * hl) < 1.0):
+			hl += 1.0
+		var y0: float = max(terrain.height(best.x + dir.x * hl, best.y + dir.y * hl), terrain.height(best.x - dir.x * hl, best.y - dir.y * hl))
+		y0 = max(y0, 1.2)
+		var deck := box(Vector3(5.0, 0.5, hl * 2.0 + 1.0), Color("#8a6a45"), Vector3(best.x, y0, best.y), world)
+		deck.rotation.y = rot
+		bridges.append({"c": best, "dir": dir, "hl": hl + 0.5, "y": y0})
+		for sgn in [-1.0, 1.0]:
+			var side: Vector2 = best + Vector2(dir.y, -dir.x) * 2.4 * sgn
+			var rail: MeshInstance3D = box(Vector3(0.2, 0.9, hl * 2.0), Color("#6b4f33"), Vector3(side.x, y0 + 0.7, side.y), world)
+			rail.rotation.y = rot
+			var e := -hl + 0.5
+			while e <= hl:
+				var pp: Vector2 = side + dir * e
+				cyl(0.18, 0.18, y0 + 3.5, Color("#5b3a1e"), Vector3(pp.x, (y0 + 1.2 - 2.3) / 2.0, pp.y), world, 6)
+				e += 5.0
+	# carteles en los caminos con hacia dónde va cada uno
+	var signs = [[Vector2(-60, 12), "← Sapientia   Lumen →"], [Vector2(-14, -60), "↑ Cordillera   Lumen ↓"], [Vector2(65, 6), "← Lumen   Bosque del Este →"], [Vector2(4, 70), "↑ Lumen   Campos del Sur ↓"],
+		[Vector2(-300, 52), "← Cañadón   Sapientia →"]]
+	for sg in signs:
+		var q: Vector2 = sg[0]
+		var off := Vector2(4.0, 4.0)
+		q = free_spot(q + off, 0.8)
+		var y := H(q.x, q.y)
+		cyl(0.12, 0.14, 2.6, Color("#5b3a1e"), Vector3(q.x, y + 1.3, q.y), world, 6)
+		var board := box(Vector3(2.6, 0.5, 0.1), Color("#a07a4e"), Vector3(q.x, y + 2.3, q.y), world)
+		var lb := Label3D.new()
+		lb.text = sg[1]
+		lb.font_size = 40
+		lb.pixel_size = 0.01
+		lb.modulate = Color("#2b1d10")
+		lb.outline_size = 0
+		lb.position = Vector3(q.x, y + 2.3, q.y + 0.07)
+		world.add_child(lb)
+		var lb2: Label3D = lb.duplicate()
+		lb2.position = Vector3(q.x, y + 2.3, q.y - 0.07)
+		lb2.rotation.y = PI
+		world.add_child(lb2)
+	# arcos de piedra y columnas en el campo (puntos de referencia)
+	for i in 7:
+		var q := find_site(Vector2(r.randf_range(-400, 400), r.randf_range(-260, 400)), 6.0)
+		if q.x == INF:
+			continue
+		var a := r.randf() * TAU
+		var dx := Vector2(cos(a), -sin(a))
+		var stone := Color("#b8ab92").darkened(r.randf() * 0.15)
+		var hh := r.randf_range(8.0, 13.0)
+		for sgn in [-1.0, 1.0]:
+			var pc: Vector2 = q + dx * 4.5 * sgn
+			solid_box(Vector3(2.4, hh, 2.4), stone, Vector3(pc.x, H(pc.x, pc.y) + hh / 2.0 - 0.5, pc.y), a)
+		var top := box(Vector3(12.0, 2.0, 2.6), stone.lightened(0.05), Vector3(q.x, H(q.x, q.y) + hh + 0.3, q.y), world)
+		top.rotation.y = a
+		var moss := box(Vector3(11.0, 0.4, 2.7), Color("#6f8f48"), Vector3(q.x, H(q.x, q.y) + hh + 1.45, q.y), world)
+		moss.rotation.y = a
+	# fogatas de viajeros con troncos para sentarse y una olla
+	for i in 6:
+		var road: Array = Terrain.ROADS[i % Terrain.ROADS.size()]
+		var base: Vector2 = road[min(road.size() - 1, 1 + i / 4)].lerp(road[min(road.size() - 1, 2 + i / 4)], 0.5)
+		var q: Vector2 = find_site(base + Vector2(9, -7), 3.0)
+		if q.x == INF:
+			continue
+		var y := H(q.x, q.y)
+		for k in 7:
+			var a := TAU * k / 7.0
+			sphere(0.25, Color("#7d776c"), Vector3(q.x + cos(a) * 0.9, y + 0.1, q.y + sin(a) * 0.9), world)
+		var fl := sphere(0.45, Color("#ff9b50"), Vector3(q.x, y + 0.4, q.y), world)
+		fl.material_override = glow_mat(Color("#ff8a3a"), 1.8)
+		cyl(0.45, 0.35, 0.5, Color("#2f2f33"), Vector3(q.x, y + 0.9, q.y), world, 8)
+		for sgn in [-1.0, 1.0]:
+			var lg: MeshInstance3D = cyl(0.25, 0.25, 2.0, Color("#6b4f33"), Vector3(q.x + 2.2 * sgn, y + 0.25, q.y), world, 6)
+			lg.rotation.x = PI / 2
+		pois.append({"name": "Fogata (se puede cocinar)", "x": q.x, "z": q.y, "r": 10.0})
+	# cofres: escondidos por el mapa, y uno en cada campamento que se abre al vaciarlo
+	for i in camps.size():
+		var cp: Dictionary = camps[i]
+		var back: Vector2 = cp.pos - (Vector2.ZERO - cp.pos).normalized() * 6.0
+		var q: Vector2 = free_spot(back, 0.9)
+		add_chest(q, int(cp.tier), i)
+	var placed := 0
+	var tries := 0
+	while placed < 18 and tries < 2000:
+		tries += 1
+		var q := Vector2(r.randf_range(-460, 460), r.randf_range(-460, 460))
+		if not site_ok(q.x, q.y, 2.0):
+			continue
+		add_chest(q, max(0, zone_at(q.x, q.y).tier), -1)
+		placed += 1
+	# bandadas de pájaros que dan vueltas
+	for i in 12:
+		var fl := Node3D.new()
+		var cx := r.randf_range(-420, 420)
+		var cz := r.randf_range(-420, 420)
+		fl.position = Vector3(cx, H(cx, cz) + r.randf_range(18, 32), cz)
+		world.add_child(fl)
+		var rad := r.randf_range(12, 26)
+		for k in 7:
+			var b := Node3D.new()
+			b.position = Vector3(rad + r.randf_range(-3, 3), r.randf_range(-2, 2), r.randf_range(-3, 3))
+			fl.add_child(b)
+			for sgn in [-1.0, 1.0]:
+				var w: MeshInstance3D = box(Vector3(0.7, 0.05, 0.25), Color("#2e2e33"), Vector3(0.3 * sgn, 0, 0), b)
+				w.rotation.z = 0.35 * sgn
+				w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			b.rotation.y = PI / 2
+		flocks.append({"node": fl, "spd": r.randf_range(0.25, 0.5) * (1.0 if r.randf() < 0.5 else -1.0)})
+	# viajeros que van y vienen por los caminos
+	var who = [["Mercader ambulante", Color("#8a5a3a")], ["Peregrina", Color("#d9d2bf")], ["Cartógrafo", Color("#3d5f9e")], ["Cazadora", Color("#4f6b3a")]]
+	for i in who.size():
+		var road: Array = Terrain.ROADS[i % Terrain.ROADS.size()]
+		var nd := Node3D.new()
+		world.add_child(nd)
+		cyl(0.38, 0.45, 1.3, who[i][1], Vector3(0, 0.85, 0), nd, 8)
+		sphere(0.3, Color("#d9a77c"), Vector3(0, 1.75, 0), nd)
+		cyl(0.01, 0.45, 0.35, who[i][1].darkened(0.3), Vector3(0, 2.1, 0), nd, 8)
+		if i == 0:
+			box(Vector3(0.8, 0.9, 0.5), Color("#6b4f33"), Vector3(0, 1.2, -0.45), nd)
+		travelers.append({"name": who[i][0], "road": road, "seg": 1, "t": 0.2, "dir": 1, "node": nd, "x": 0.0, "z": 0.0})
+
+func add_chest(q: Vector2, tier: int, camp: int) -> void:
+	var y := H(q.x, q.y)
+	var nd := Node3D.new()
+	nd.position = Vector3(q.x, y, q.y)
+	nd.rotation.y = randf() * TAU
+	world.add_child(nd)
+	var wood := Color("#7a5634") if tier < 2 else Color("#3e3326")
+	box(Vector3(1.2, 0.7, 0.8), wood, Vector3(0, 0.35, 0), nd)
+	var lid := Node3D.new()
+	lid.position = Vector3(0, 0.7, -0.4)
+	nd.add_child(lid)
+	box(Vector3(1.24, 0.3, 0.84), wood.lightened(0.08), Vector3(0, 0.15, 0.4), lid)
+	box(Vector3(1.26, 0.12, 0.2), Color("#d9b44a"), Vector3(0, 0.15, 0.4), lid)
+	chests.append({"x": q.x, "z": q.y, "tier": tier, "camp": camp, "open": false, "lid": lid, "warned": 0.0})
+
+func open_chest(c: Dictionary) -> void:
+	c.open = true
+	var loot := []
+	var pool: Array = [["Pedernal", "Hierro", "Ámbar"], ["Hierro", "Plata", "Cuarzo solar"], ["Plata", "Cuarzo solar", "Luminita"], ["Mithril", "Luminita", "Cuarzo solar"]][clamp(c.tier, 0, 3)]
+	for k in 2:
+		var it: String = pool[randi() % pool.size()]
+		var n := randi_range(1, 3)
+		minerals[it] = int(minerals.get(it, 0)) + n
+		loot.append("+%d %s" % [n, it])
+	if randf() < 0.3:
+		var fid: String = ["Rubí ígneo", "Obsidiana del vacío", "Jade de viento", "Perla de marea"][randi() % 4]
+		if c.tier >= 2:
+			minerals[fid] = int(minerals.get(fid, 0)) + 1
+			loot.append("+1 " + fid)
+	add_text(Vector3(c.x, 2.4, c.z), "Cofre: " + "  ".join(loot), Color("#f2cc60"), 14)
+	flash_fx("ring", c.x, c.z, 1.6, Vector2(0, 1), Color("#f2cc60"))
+
+func update_world_life(dt: float) -> void:
+	# santuarios: descubrir al acercarse
+	for sh in shrines:
+		if not sh.found and d2(P.x, P.z, sh.x, sh.z) < 6.0:
+			sh.found = true
+			sh.orb.material_override = glow_mat(Color("#7ec8ff"), 1.2)
+			sh.beam.visible = false
+			toast("%s descubierto · viaje rápido desde el minimapa" % sh.name)
+	# cofres
+	for c in chests:
+		if c.open:
+			c.lid.rotation.x = lerp(c.lid.rotation.x, -1.9, 0.12)
+			continue
+		c.warned = max(0.0, c.warned - dt)
+		if d2(P.x, P.z, c.x, c.z) < 2.0:
+			var locked := false
+			if c.camp >= 0:
+				for m in mobs:
+					if m.camp == c.camp and m.dead <= 0:
+						locked = true
+			if locked:
+				if c.warned <= 0:
+					add_text(Vector3(c.x, 2.0, c.z), "Cerrado: vaciá el campamento", Color("#c9d1d9"), 13)
+					c.warned = 3.0
+			else:
+				open_chest(c)
+	# viajeros
+	for tv in travelers:
+		var road: Array = tv.road
+		var a: Vector2 = road[tv.seg - 1]
+		var b: Vector2 = road[tv.seg]
+		var L: float = max(1.0, a.distance_to(b))
+		tv.t += dt * 2.0 / L * tv.dir
+		if tv.t > 1.0:
+			if tv.seg < road.size() - 1:
+				tv.seg += 1
+				tv.t = 0.0
+			else:
+				tv.dir = -1
+				tv.t = 1.0
+		elif tv.t < 0.0:
+			if tv.seg > 1:
+				tv.seg -= 1
+				tv.t = 1.0
+			else:
+				tv.dir = 1
+				tv.t = 0.0
+		var p: Vector2 = (road[tv.seg - 1] as Vector2).lerp(road[tv.seg], clamp(tv.t, 0.0, 1.0))
+		var side: Vector2 = (b - a).normalized()
+		p += Vector2(side.y, -side.x) * 1.4 * tv.dir
+		tv.x = p.x
+		tv.z = p.y
+		tv.node.position = Vector3(p.x, H(p.x, p.y), p.y)
+		tv.node.rotation.y = atan2(side.x * tv.dir, side.y * tv.dir)
+	for fl in flocks:
+		fl.node.rotation.y += fl.spd * dt
+
+# viaje rápido: clic en un santuario descubierto (o una ciudad) del minimapa
+func try_fast_travel(pos: Vector2) -> bool:
+	var vw := get_viewport().get_visible_rect().size.x
+	var sz := 190.0
+	var o := Vector2(vw - sz - 12, 52)
+	if not Rect2(o, Vector2(sz, sz)).has_point(pos):
+		return false
+	var targets := []
+	for sh in shrines:
+		if sh.found:
+			targets.append([sh.name, Vector2(sh.x, sh.z)])
+	for k in CITIES:
+		targets.append([CITIES[k].name, CITIES[k].spawn])
+	for t in targets:
+		var mp: Vector2 = o + Vector2((t[1].x + Terrain.HALF) / Terrain.SIZE, (t[1].y + Terrain.HALF) / Terrain.SIZE) * sz
+		if mp.distance_to(pos) < 8.0:
+			var q: Vector2 = free_spot(t[1] + Vector2(0, 4), 1.0)
+			P.x = q.x
+			P.z = q.y
+			cam_x = P.x
+			cam_z = P.z
+			for m in mobs:
+				calm(m)
+			toast("Viajaste a %s (en el juego final cuesta un poco de Oro)" % t[0])
+			return true
+	return true
+
 # ----------------------------------------------------------------- vetas de mineral
+func ore_region_ok(kind: String, x: float, z: float) -> bool:
+	var t: int = zone_at(x, z).tier
+	match kind:
+		"piedra":
+			return t == 0 or t == 1
+		"hierro":
+			return t == 1
+		"azufre":
+			return x < -270.0 and z > -280.0
+		"cuarzo":
+			return t >= 0 and t <= 2
+		"plata":
+			return t == 2
+		"mithril":
+			return t == 3
+		"frontera":
+			return abs(x) > 420.0 or abs(z) > 420.0
+	return true
+
 func build_ores() -> void:
 	var r := RandomNumberGenerator.new()
 	r.seed = 4242
-	var plan = [["piedra", 70, -470.0, 470.0, -280.0, 470.0], ["azufre", 26, -500.0, -270.0, -250.0, 300.0],
-		["cristal", 26, -470.0, 470.0, -470.0, -230.0], ["preciosa", 9, -470.0, 470.0, -480.0, -320.0]]
+	var plan = [["piedra", 60], ["hierro", 30], ["azufre", 22], ["cuarzo", 30], ["plata", 25], ["mithril", 22], ["frontera", 10]]
 	for pl in plan:
 		var made := 0
 		var tries := 0
-		while made < int(pl[1]) and tries < 3000:
+		while made < int(pl[1]) and tries < 4000:
 			tries += 1
-			var x := r.randf_range(pl[2], pl[3])
-			var z := r.randf_range(pl[4], pl[5])
+			var x := r.randf_range(-480.0, 480.0)
+			var z := r.randf_range(-480.0, 480.0)
+			if not ore_region_ok(pl[0], x, z):
+				continue
 			if in_city(x, z, 15.0) or terrain.road_dist(Vector2(x, z)) < 4.0 or terrain.river_dist(Vector2(x, z)) < 5.0:
 				continue
 			var h: float = terrain.height(x, z)
@@ -1502,10 +1878,19 @@ func add_ore(kind: String, x: float, z: float, r: RandomNumberGenerator) -> void
 			g.material_override.emission_enabled = true
 			g.material_override.emission = d.gem
 			g.material_override.emission_energy_multiplier = 0.8
+	for ch in node.get_children():
+		if ch is GeometryInstance3D:
+			ch.visibility_range_end = 140.0
 	add_collider(Vector2(x, z), Vector2(1.0, 1.0) * sc, 0.0)
 	ores.append({"kind": kind, "x": x, "z": z, "hp": d.hp, "max": d.hp, "node": node, "col": last_col, "regrow": 0.0, "sc": sc})
 
-func damage_ores(x: float, z: float, r: float, dmg: float, once = null) -> void:
+func damage_ores(x: float, z: float, r: float, dmg: float, once = null, blast := false) -> void:
+	# golpes pesados y explosiones rompen la roca más rápido; la magia, más lento
+	var wt: String = weapon.get("wtype", "")
+	if blast or wt in ["mandoble", "escudo"]:
+		dmg *= 2.0
+	elif not Data.WTYPES.get(wt, {"phys": true}).phys:
+		dmg *= 0.5
 	for o in ores:
 		if o.regrow > 0:
 			continue
@@ -1527,7 +1912,10 @@ func break_ore(o: Dictionary) -> void:
 	o.col.off = true
 	flash_fx("ring", o.x, o.z, 2.2, Vector2(0, 1), d.gem)
 	var got := []
-	for dr in d.drops:
+	var drops: Array = d.drops
+	if o.kind == "frontera":
+		drops = [[d.drops[randi() % d.drops.size()][0], 1.0]]
+	for dr in drops:
 		if randf() < float(dr[1]):
 			var n := 1 + (1 if randf() < 0.3 else 0)
 			minerals[dr[0]] = int(minerals.get(dr[0], 0)) + n
@@ -2569,6 +2957,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			cam_drag = event.pressed
 		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed and running and P and try_fast_travel(event.position):
+				return
 			basic_held = event.pressed and running
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			cam_dist = clamp(cam_dist * 0.9, 8.0, 34.0)
@@ -2615,9 +3005,9 @@ func can_walk(x0: float, z0: float, x1: float, z1: float) -> bool:
 	if blocked(x1, z1) and not blocked(x0, z0):
 		return false
 	var h1: float = terrain.height(x1, z1)
-	if h1 < Terrain.WATER - 1.2:
+	if h1 < Terrain.WATER - 1.2 and bridge_top(x1, z1) == -INF:
 		return false
-	var rise: float = h1 - terrain.height(x0, z0)
+	var rise: float = H(x1, z1) - H(x0, z0)
 	var run: float = max(0.001, Vector2(x1 - x0, z1 - z0).length())
 	return rise / run < 1.3
 
@@ -3321,6 +3711,7 @@ func update_game(dt: float) -> void:
 	update_living(dt)
 	update_trees(dt)
 	update_ores(dt)
+	update_world_life(dt)
 	for i in range(zones.size() - 1, -1, -1):
 		var zn: Zone = zones[i]
 		zn.t -= dt
@@ -3760,7 +4151,7 @@ func update_projs(dt: float) -> void:
 							if o2.dead <= 0 and d2(o2.x, o2.z, m.x, m.z) < p.s.explode:
 								hit_mob(o2, p.s.dmg, oo)
 						flash_fx("disc", m.x, m.z, p.s.explode, Vector2(0, 1), weapon.color)
-						damage_trees(m.x, m.z, p.s.explode, p.s.dmg)
+						damage_trees(m.x, m.z, p.s.explode, p.s.dmg, null, true)
 						if el:
 							element_at(m.x, m.z, el, p.s.explode)
 					else:
@@ -3795,7 +4186,7 @@ func update_projs(dt: float) -> void:
 				var tr = tree_at(p.x, p.z)
 				if tr:
 					if p.s.has("explode"):
-						damage_trees(p.x, p.z, p.s.explode, p.s.dmg)
+						damage_trees(p.x, p.z, p.s.explode, p.s.dmg, null, true)
 						flash_fx("disc", p.x, p.z, p.s.explode, Vector2(0, 1), weapon.color)
 					else:
 						damage_trees(tr.x, tr.z, 0.1, p.s.dmg)
@@ -3974,6 +4365,22 @@ func draw_overlay() -> void:
 			tag += "◆"
 		if tag != "":
 			overlay.draw_string(font, Vector2(p.x - 50, p.y - 20), tag, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color("#f2cc60"))
+	var named := []
+	for po in pois:
+		named.append([po.name, po.x, po.z, po.r, 4.0, Color("#f0e6d2")])
+	for sh in shrines:
+		named.append([sh.name, sh.x, sh.z, 30.0, 5.0, Color("#7ec8ff") if sh.found else Color("#ffb070")])
+	for tv in travelers:
+		named.append([tv.name, tv.x, tv.z, 16.0, 2.6, Color("#f0e6d2")])
+	for nm in named:
+		if d2(P.x, P.z, nm[1], nm[2]) > nm[3]:
+			continue
+		var wp3 := Vector3(nm[1], H(nm[1], nm[2]) + nm[4], nm[2])
+		if camera.is_position_behind(wp3):
+			continue
+		var q3 := camera.unproject_position(wp3)
+		overlay.draw_string_outline(font, q3 + Vector2(-100, 0), nm[0], HORIZONTAL_ALIGNMENT_CENTER, 200, 13, 4, Color(0, 0, 0, 0.8))
+		overlay.draw_string(font, q3 + Vector2(-100, 0), nm[0], HORIZONTAL_ALIGNMENT_CENTER, 200, 13, nm[5])
 	for o in ores:
 		if o.regrow > 0 or d2(P.x, P.z, o.x, o.z) > 14.0:
 			continue
@@ -4012,6 +4419,10 @@ func draw_minimap(font: Font) -> void:
 		return o + Vector2((x + Terrain.HALF) / Terrain.SIZE, (z + Terrain.HALF) / Terrain.SIZE) * sz
 	for cp in camps:
 		overlay.draw_circle(to_map.call(cp.pos.x, cp.pos.y), 2.5, Data.TIERS[cp.tier].color)
+	for sh in shrines:
+		if sh.found:
+			var sp: Vector2 = to_map.call(sh.x, sh.z)
+			overlay.draw_colored_polygon(PackedVector2Array([sp + Vector2(0, -5), sp + Vector2(4.5, 3.5), sp + Vector2(-4.5, 3.5)]), Color("#7ec8ff"))
 	for m in mobs:
 		if m.dead <= 0 and m.d.ai == "brute":
 			overlay.draw_circle(to_map.call(m.x, m.z), 3.5, Color("#f85149"))
