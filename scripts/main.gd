@@ -1480,6 +1480,9 @@ func set_cell(c: Cell, st: String) -> void:
 	elif st == "burnt":
 		sy = 0.18
 		col = Color("#3a2e24")
+	elif st == "cut":
+		sy = 0.22
+		col = c.tint.lightened(0.15)
 	var b := Basis(Vector3.UP, float(c.idx % 7)).scaled(Vector3(1.05, sy, 1.05))
 	grass_mm.set_instance_transform(c.idx, Transform3D(b, Vector3(c.x, c.base_y - 0.05, c.z)))
 	grass_mm.set_instance_color(c.idx, col)
@@ -1489,6 +1492,19 @@ func ignite(c) -> void:
 		set_cell(c, "fire")
 		c.t = 3.2
 		c.spread = 0.5
+
+# cortar el pasto alto con ataques de espada (deja al descubierto al que se escondía)
+func cut_grass(x: float, z: float, r: float) -> void:
+	var n := 0
+	for i in range(int(floor((x - r) / CELL)), int(floor((x + r) / CELL)) + 1):
+		for j in range(int(floor((z - r) / CELL)), int(floor((z + r) / CELL)) + 1):
+			var c = cells.get(ck(i, j))
+			if c and c.st == "grass" and Vector2(c.x - x, c.z - z).length() <= r + CELL * 0.6:
+				set_cell(c, "cut")
+				c.t = 60.0
+				n += 1
+	if n > 0:
+		flash_fx("ring", x, z, r, Vector2(0, 1), Color("#9ccf6a"))
 
 func electrify(pd: Puddle) -> void:
 	if pd.cool > 0:
@@ -1554,7 +1570,7 @@ func update_living(dt: float) -> void:
 			if c.t <= 0:
 				set_cell(c, "burnt")
 				c.t = 40.0
-		elif c.st == "burnt":
+		elif c.st == "burnt" or c.st == "cut":
 			c.t -= dt
 			if c.t <= 0:
 				set_cell(c, "grass")          # el pasto vuelve a crecer
@@ -2110,6 +2126,7 @@ func try_basic() -> void:
 			swing_fx()
 			play_action("attack", 0.7, 2.6)
 			damage_trees(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6, b.dmg)
+			cut_grass(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6)
 			if oil:
 				element_at(P.x + P.fx * 2, P.z + P.fz * 2, oil, 1.2)
 			P.cds.basic = b.cd
@@ -2119,6 +2136,7 @@ func try_basic() -> void:
 		play_action("attack", 0.7, 2.6)
 		hit_mob(t, b.dmg, {"basic": true, "el": oil})
 		damage_trees(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6, b.dmg)
+		cut_grass(P.x + P.fx * 1.6, P.z + P.fz * 1.6, b.range * 0.6)
 	else:
 		var d := Vector2.ZERO
 		if t:
@@ -2175,6 +2193,8 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 					hit_mob(m, s.dmg, opts)
 			flash_fx("sector:%d" % s.angle, P.x, P.z, s.range, d, col)
 			damage_trees(P.x + d.x * s.range * 0.55, P.z + d.y * s.range * 0.55, s.range * 0.5, tdmg)
+			if weapon.phys:
+				cut_grass(P.x + d.x * s.range * 0.55, P.z + d.y * s.range * 0.55, s.range * 0.45)
 			if s.has("el"):
 				for pd in puddles:
 					var L := d2(pd.x, pd.z, P.x, P.z)
@@ -2198,6 +2218,8 @@ func cast_skill(slot: String, use_mouse: bool) -> void:
 					hit_mob(m, s.dmg, opts)
 			flash_fx("disc", P.x, P.z, s.radius, d, col)
 			damage_trees(P.x, P.z, s.radius, tdmg)
+			if weapon.phys:
+				cut_grass(P.x, P.z, s.radius)
 		"line":
 			var bl := Blast.new()
 			bl.line = true
@@ -2619,6 +2641,8 @@ func update_game(dt: float) -> void:
 						D.hit[m] = true
 						hit_mob(m, ds.dmg, {"skill": true, "s": ds})
 				damage_trees(P.x, P.z, max(0.8, ds.width / 2.0), float(ds.dmg) * rank_mult(slot_of(ds)), D.trees)
+				if weapon.phys:
+					cut_grass(P.x, P.z, max(0.8, ds.width / 2.0))
 			if k >= 1:
 				P.dash = null
 				if P.queued and P.queued.dead <= 0:
@@ -2643,6 +2667,7 @@ func update_game(dt: float) -> void:
 						hit_mob(m, L.s.dmg, {"skill": true, "s": L.s})
 				flash_fx("disc", P.x, P.z, L.s.radius, Vector2(0, 1), weapon.color)
 				damage_trees(P.x, P.z, L.s.radius, float(L.s.dmg) * rank_mult(slot_of(L.s)))
+				cut_grass(P.x, P.z, L.s.radius)
 		else:
 			var ix := 0.0
 			var iy := 0.0
